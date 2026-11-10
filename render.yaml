@@ -14,3 +14,6 @@ services:
         value: 22.12.0
       - key: PROVIDER
         value: vps
+      # Chuỗi kết nối Postgres (VD Neon miễn phí) để lưu cảnh báo bền vững. Nhập trong Render > Environment.
+      - key: DATABASE_URL
+        sync: false

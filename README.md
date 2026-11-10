@@ -8,7 +8,14 @@ biểu đồ nến cập nhật theo từng lệnh khớp, sổ lệnh 3 bước
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HaPhong2k1/vn-stock)
 
 Bấm nút → đăng nhập Render bằng GitHub → **Apply**. Khoảng 3–5 phút sau sẽ có link dạng `https://vn-stock-xxxx.onrender.com`.
-Gói miễn phí: server "ngủ" sau 15 phút không có ai truy cập (lần mở sau chờ ~1 phút), cảnh báo đã tạo có thể mất khi server khởi động lại.
+Link hiện tại: **https://vn-stock.onrender.com**
+
+### Cho cảnh báo chạy ổn định 24/7 (miễn phí)
+1. **Lưu cảnh báo vào DB:** tạo Postgres miễn phí ở https://neon.tech (đăng nhập GitHub) → copy *connection string*
+   → Render > service `vn-stock` > **Environment** > thêm `DATABASE_URL` = chuỗi đó → Save. Bảng được tạo tự động.
+2. **Không cho server ngủ:** server tự ping chính nó mỗi 10 phút (dùng `RENDER_EXTERNAL_URL` do Render cấp).
+   Dự phòng: tạo monitor HTTP ở https://uptimerobot.com trỏ tới `https://vn-stock.onrender.com/api/health`, chu kỳ 5 phút.
+3. Dùng cùng cảnh báo trên nhiều thiết bị: tab 🔔 > **Mã đồng bộ thiết bị**.
 
 ## Chạy nhanh
 
@@ -83,6 +90,8 @@ Mã nguồn chỉ báo dùng chung server/web: `shared/indicators.js` (kiểm th
 | `ALERT_COOLDOWN_MS` | 900000 | Khoảng cách tối thiểu giữa 2 lần báo của 1 cảnh báo |
 | `SIGNAL_DEDUPE_MS` | 900000 | Gộp tín hiệu trùng mã/loại |
 | `TELEGRAM_BOT_TOKEN` | — | Bật gửi cảnh báo qua Telegram |
+| `DATABASE_URL` | — | Postgres để lưu cảnh báo bền vững (không có => file `server/data/alerts.json`) |
+| `KEEPALIVE` | bật | `0` để tắt tự ping chống ngủ trên Render |
 
 ### API
 - `GET /api/health` – trạng thái feed, số mã, phiên

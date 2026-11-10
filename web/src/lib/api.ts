@@ -7,6 +7,11 @@ export const clientId = (() => {
   } catch { return 'anon-' + Math.random().toString(36).slice(2, 12); }
 })();
 
+export function setClientId(id: string) {
+  try { localStorage.setItem('clientId', id); } catch { /* bỏ qua */ }
+  location.reload();
+}
+
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
   const r = await fetch(`/api${path}`, {
     method: opts.method || 'GET',

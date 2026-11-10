@@ -1,10 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 const COOLDOWN_MS = Number(process.env.ALERT_COOLDOWN_MS || 15 * 60_000);
-const FILE = process.env.ALERTS_FILE || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/alerts.json');
 
 /**
  * Các loại điều kiện cảnh báo.
@@ -26,21 +22,39 @@ export const ALERT_TYPES = {
 };
 
 export class AlertEngine {
-  constructor(store, analytics, log = console) {
-    this.store = store; this.analytics = analytics; this.log = log;
+  constructor(store, analytics, storage, log = console) {
+    this.store = store; this.analytics = analytics; this.storage = storage; this.log = log;
     this.alerts = [];
     this.history = []; // các lần kích hoạt
     this.state = new Map(); // id -> kết quả test lần trước (cho loại event)
     this.listeners = new Set();
-    try { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); this.alerts = j.alerts || []; this.history = j.history || []; } catch { /* trống */ }
     analytics.on('metrics', (m) => this.evaluate(m.s));
     store.on('stock', (st) => this.evaluate(st.s, true));
   }
 
-  save() {
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify({ alerts: this.alerts, history: this.history.slice(0, 1000) }));
+  /** Nạp cảnh báo đã lưu (DB/file) khi khởi động */
+  async init() {
+    this.alerts = await this.storage.loadAlerts();
+    this.history = await this.storage.loadHistory();
+    this.log.info(`[alert] nạp ${this.alerts.length} cảnh báo`);
   }
+
+  /**
+   * Ghi bền vững theo hàng đợi tuần tự (giữ đúng thứ tự ghi), thử lại tối đa 3 lần.
+   * Lỗi DB không làm dừng việc kiểm tra cảnh báo (trạng thái chính nằm trong bộ nhớ).
+   */
+  persist(fn) {
+    this.queue = (this.queue || Promise.resolve()).then(async () => {
+      for (let i = 0; ; i++) {
+        try { return await fn(); } catch (e) {
+          if (i >= 3) { this.log.warn('[alert] lưu thất bại', e.message); return; }
+          await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        }
+      }
+    });
+    return this.queue;
+  }
+  flushed() { return this.queue || Promise.resolve(); }
 
   list(owner) { return this.alerts.filter((a) => a.owner === owner); }
   historyOf(owner) { return this.history.filter((h) => h.owner === owner).slice(0, 200); }
@@ -54,10 +68,10 @@ export class AlertEngine {
     if (this.list(owner).length >= 200) throw Object.assign(new Error('Tối đa 200 cảnh báo'), { status: 400 });
     const a = { id: crypto.randomUUID(), owner, sym, type, value: ALERT_TYPES[type].kind === 'level' ? v : null, repeat: !!repeat, note: String(note).slice(0, 200), telegramChatId: String(telegramChatId || '').slice(0, 40), active: true, createdAt: Date.now(), firedCount: 0, lastFiredAt: 0 };
     this.alerts.push(a);
+    this.persist(() => this.storage.upsertAlert(a));
     // Với loại sự kiện: ghi nhận trạng thái hiện tại làm mốc để chỉ báo khi có lần cắt MỚI
     const st = this.store.stocks.get(sym);
     if (ALERT_TYPES[type].kind === 'event') this.state.set(a.id, ALERT_TYPES[type].test(st, this.analytics.metrics.get(sym), a.value));
-    this.save();
     this.evaluate(sym);
     return a;
   }
@@ -66,7 +80,7 @@ export class AlertEngine {
     const a = this.alerts.find((x) => x.id === id && x.owner === owner);
     if (!a) throw Object.assign(new Error('Không tìm thấy'), { status: 404 });
     if ('active' in patch) { a.active = !!patch.active; this.state.delete(a.id); }
-    this.save();
+    this.persist(() => this.storage.upsertAlert(a));
     if (a.active) this.evaluate(a.sym);
     return a;
   }
@@ -75,7 +89,8 @@ export class AlertEngine {
     const n = this.alerts.length;
     this.alerts = this.alerts.filter((x) => !(x.id === id && x.owner === owner));
     if (this.alerts.length === n) throw Object.assign(new Error('Không tìm thấy'), { status: 404 });
-    this.save();
+    this.state.delete(id);
+    this.persist(() => this.storage.deleteAlert(id));
   }
 
   evaluate(sym, priceOnly = false) {
@@ -107,7 +122,9 @@ export class AlertEngine {
     const msg = `${a.sym}: ${def.label}${a.value !== null && def.kind === 'level' ? ' ' + a.value : ''} — giá ${st.last} (${st.chgPc > 0 ? '+' : ''}${st.chgPc}%)${m?.ma20 ? `, MA20 ${m.ma20}` : ''}${m?.rsi14 ? `, RSI ${m.rsi14}` : ''}`;
     const ev = { id: crypto.randomUUID(), alertId: a.id, owner: a.owner, sym: a.sym, type: a.type, msg, price: st.last, at: Date.now() };
     this.history.unshift(ev);
-    this.save();
+    if (this.history.length > 5000) this.history.length = 5000;
+    this.persist(() => this.storage.insertEvent(ev));
+    this.persist(() => this.storage.upsertAlert(a));
     this.log.info('[alert]', msg);
     this.listeners.forEach((l) => l(ev, a));
     if (a.telegramChatId && process.env.TELEGRAM_BOT_TOKEN) {

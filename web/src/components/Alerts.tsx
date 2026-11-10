@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ALERT_LABELS, SIGNAL_LABELS, type Alert, type AlertEvent, type Signal } from '../lib/api';
+import { api, clientId, setClientId, ALERT_LABELS, SIGNAL_LABELS, type Alert, type AlertEvent, type Signal } from '../lib/api';
 import { feed } from '../lib/feed';
 
 const time = (t: number) => new Date(t).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
@@ -68,6 +68,16 @@ export function Alerts({ initialSym, onPick }: Props) {
       </section>
 
       <section className="card">
+        <h3>Mã đồng bộ thiết bị</h3>
+        <div className="aform">
+          <span>Mã của trình duyệt này: <code className="code">{clientId}</code></span>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(clientId)}>Sao chép</button>
+          <SyncInput />
+        </div>
+        <div className="muted note">Dán mã này ở điện thoại/máy khác để dùng chung danh sách cảnh báo. Giữ bí mật — ai có mã đều xem/sửa được cảnh báo của bạn.</div>
+      </section>
+
+      <section className="card">
         <h3>Cảnh báo của tôi ({alerts.length})</h3>
         <table className="grid">
           <thead><tr><th>Mã</th><th>Điều kiện</th><th>Lặp</th><th>Đã báo</th><th>Lần cuối</th><th>Trạng thái</th><th /></tr></thead>
@@ -112,5 +122,16 @@ export function Alerts({ initialSym, onPick }: Props) {
         </section>
       </div>
     </div>
+  );
+}
+
+function SyncInput() {
+  const [v, setV] = useState('');
+  const ok = /^[\w-]{8,64}$/.test(v.trim());
+  return (
+    <>
+      <input placeholder="Dán mã từ thiết bị khác" value={v} onChange={(e) => setV(e.target.value)} style={{ width: 300 }} />
+      <button type="button" disabled={!ok} onClick={() => { if (confirm('Dùng mã này? Các cảnh báo của mã hiện tại sẽ không hiển thị nữa (vẫn được lưu).')) setClientId(v.trim()); }}>Dùng mã này</button>
+    </>
   );
 }

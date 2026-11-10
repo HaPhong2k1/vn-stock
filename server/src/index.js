@@ -14,13 +14,17 @@ import { sessionOf } from './market-hours.js';
 import { DailyStore } from './daily.js';
 import { Analytics } from './analytics.js';
 import { AlertEngine, ALERT_TYPES } from './alerts.js';
+import { createStorage } from './storage.js';
+import { startKeepAlive } from './keepalive.js';
 
 const store = new MarketStore();
 const provider = config.provider === 'sim' ? new SimProvider(store) : new VpsProvider(store);
 const daily = new DailyStore();
 daily.loadCache();
 const analytics = new Analytics(store, daily);
-const alerts = new AlertEngine(store, analytics);
+const storage = await createStorage();
+const alerts = new AlertEngine(store, analytics, storage);
+await alerts.init();
 const app = express();
 app.use(compression());
 app.use(express.json({ limit: '20kb' }));
@@ -45,6 +49,7 @@ app.delete('/api/alerts/:id', wrap((req) => { alerts.remove(owner(req), req.para
 app.get('/api/health', (_req, res) => res.json({
   ok: true, provider: config.provider, session: sessionOf(), symbols: store.stocks.size,
   feed: provider.status, lastFeedAt: store.lastFeedAt,
+  storage: storage.kind, alerts: alerts.alerts.length,
   history: { asOf: daily.asOf, loading: daily.loading, progress: daily.progress, symbols: daily.bars.size },
 }));
 app.get('/api/groups', (_req, res) => res.json(store.groups));
@@ -70,6 +75,7 @@ const hub = createHub(server, store, provider);
 analytics.on('signal', (sig) => hub.broadcast({ type: 'sig', d: sig }));
 alerts.onFire((ev, a) => hub.sendTo(ev.owner, { type: 'alert', d: ev, alert: a }));
 server.listen(config.port, () => console.log(`[server] http://localhost:${config.port} (provider=${config.provider})`));
+startKeepAlive();
 provider.start()
   .then(() => daily.schedule(() => store.allSymbols()))
   .catch((e) => { console.error('[provider] khởi động lỗi', e); });

@@ -33,6 +33,8 @@ export function createHub(server, store, provider, log = console) {
         const syms = m.syms.slice(0, 2000).map((s) => String(s).toUpperCase());
         ws.subs = new Set(syms);
         send(ws, { type: 'snap', d: syms.map((s) => store.stocks.get(s)).filter(Boolean), ts: Date.now() });
+      } else if (m.op === 'auth' && typeof m.owner === 'string' && /^[\w-]{8,64}$/.test(m.owner)) {
+        ws.owner = m.owner;
       } else if (m.op === 'ping') {
         send(ws, { type: 'pong', t: m.t, now: Date.now() });
       }
@@ -58,5 +60,9 @@ export function createHub(server, store, provider, log = console) {
     for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; ws.ping(); }
   }, 15_000);
   log.info('[hub] websocket tại /ws');
-  return wss;
+  return {
+    wss,
+    broadcast: (msg) => { for (const ws of wss.clients) send(ws, msg); },
+    sendTo: (owner, msg) => { for (const ws of wss.clients) if (ws.owner === owner) send(ws, msg); },
+  };
 }

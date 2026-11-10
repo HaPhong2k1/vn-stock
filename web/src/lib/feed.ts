@@ -1,4 +1,5 @@
 import type { FeedStatus, Index, Stock } from './types';
+import { clientId, type AlertEvent, type Signal } from './api';
 
 type Listener = () => void;
 
@@ -23,6 +24,11 @@ class Feed {
   private symListeners = new Map<string, Set<Listener>>();
   private globalListeners = new Set<Listener>();
   private retry = 0;
+  private sigListeners = new Set<(s: Signal) => void>();
+  private alertListeners = new Set<(e: AlertEvent) => void>();
+
+  onSignal(l: (s: Signal) => void) { this.sigListeners.add(l); return () => { this.sigListeners.delete(l); }; }
+  onAlert(l: (e: AlertEvent) => void) { this.alertListeners.add(l); return () => { this.alertListeners.delete(l); }; }
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -31,6 +37,7 @@ class Feed {
     this.conn = 'connecting'; this.emitGlobal();
     ws.onopen = () => {
       this.retry = 0; this.conn = 'open';
+      ws.send(JSON.stringify({ op: 'auth', owner: clientId }));
       if (this.subs.length) ws.send(JSON.stringify({ op: 'sub', syms: this.subs }));
       this.emitGlobal();
     };
@@ -76,6 +83,10 @@ class Feed {
         this.emitGlobal(); break;
       case 'status':
         this.status = m; this.clockSkew = Date.now() - m.now; this.emitGlobal(); break;
+      case 'sig':
+        this.sigListeners.forEach((l) => l(m.d)); break;
+      case 'alert':
+        this.alertListeners.forEach((l) => l(m.d)); break;
       case 'pong':
         this.latency = Math.round(performance.now() - m.t); this.emitGlobal(); break;
     }

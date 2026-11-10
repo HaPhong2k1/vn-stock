@@ -99,3 +99,50 @@ main.with-detail .board { flex: 1; }
   .toolbar input { width: 100%; margin: 4px 0 0; }
   .count { display: none; }
 }
+
+/* ---- Điều hướng, trang phụ ---- */
+.views { display: flex; gap: 4px; }
+.views button { border: 0; background: none; padding: 6px 10px; border-radius: 4px; white-space: nowrap; font-weight: 600; color: var(--muted); }
+.views button.on { background: var(--head); color: var(--text); }
+.page { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.filters { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; display: grid; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 10px; }
+.chips button.on { background: var(--text); color: var(--panel); border-color: var(--text); }
+.frow { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.frow input[type=number], .aform input, .aform select, .frow select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; }
+.frow input[type=number] { width: 100px; }
+.note { font-size: 11px; }
+.table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+table.grid { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.grid th { position: sticky; top: 0; background: var(--head); color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; }
+table.grid th, table.grid td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+table.grid th:first-child, table.grid td:first-child, table.grid td:nth-child(2) { text-align: left; }
+table.grid tbody tr { cursor: pointer; } table.grid tbody tr:hover { background: var(--head); }
+table.grid td:first-child { font-weight: 700; }
+tr.off { opacity: 0.5; }
+.tags { text-align: left !important; white-space: nowrap; }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; background: var(--head); font-size: 11px; font-weight: 600; margin-right: 3px; }
+.tag.buy { background: var(--up); color: #fff; } .tag.sell { background: var(--down); color: #fff; }
+.icon { border: 0; background: none; padding: 0 4px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.card h3 { margin: 0 0 10px; font-size: 14px; }
+.aform { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.aform label { display: flex; gap: 6px; align-items: center; }
+.primary { background: var(--up); color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; font-weight: 700; }
+.link { border: 0; background: none; color: var(--floor); padding: 0; text-decoration: underline; }
+a { cursor: pointer; color: inherit; text-decoration: underline dotted; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.feedlist { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.feedlist li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.res-tabs.ind { padding-top: 0; flex-wrap: wrap; }
+.res-tabs.ind button { display: inline-flex; align-items: center; gap: 4px; opacity: 0.55; }
+.res-tabs.ind button.on { background: none; color: var(--text); opacity: 1; font-weight: 600; }
+.res-tabs.ind i { width: 10px; height: 3px; display: inline-block; border-radius: 2px; }
+.chart.osc { height: 130px; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; align-items: center; }
+.quick button { border: 1px solid var(--line); background: var(--bg); border-radius: 4px; padding: 4px 8px; }
+.toasts { position: fixed; right: 16px; bottom: 36px; display: grid; gap: 8px; z-index: 10; max-width: 380px; }
+.toast { background: var(--text); color: var(--panel); padding: 10px 14px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.25); cursor: pointer; animation: pop .25s ease-out; }
+@keyframes pop { from { transform: translateY(10px); opacity: 0; } }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } .views button { padding: 6px; } }

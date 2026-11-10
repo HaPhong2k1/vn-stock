@@ -7,6 +7,7 @@
     "start": "npm --prefix server start",
     "start:sim": "PROVIDER=sim npm --prefix server start",
     "dev:server": "npm --prefix server run dev",
-    "dev:web": "npm --prefix web run dev"
+    "dev:web": "npm --prefix web run dev",
+    "test": "npm --prefix server test"
   }
 }

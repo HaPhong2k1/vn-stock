@@ -14,6 +14,31 @@ npm run start:sim      # chế độ giả lập: lấy snapshot thật rồi si
 
 Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localhost:5173, proxy `/api` và `/ws`).
 
+## Tính năng phân tích
+
+### Bộ lọc cổ phiếu (tab 🔎)
+Quét toàn bộ ~1.500 mã, cập nhật 3 giây/lần. Bộ lọc có sẵn (kết hợp được nhiều cái): **Cắt lên MA20 (MUA)**,
+cắt xuống MA20, trên MA20, xu hướng tăng (giá > MA20 > MA50 > MA200), RSI < 30 / > 70, KL đột biến ≥ 2× TB20,
+MACD cắt lên, EMA9 cắt EMA21, Golden cross, chạm Bollinger dưới, đỉnh 52 tuần. Lọc thêm theo sàn, GTGD, KL TB20.
+
+**Tín hiệu MUA "giá cắt lên MA20"** (nến ngày):
+`đóng cửa phiên trước ≤ MA20 phiên trước` **và** `giá khớp hiện tại > MA20 hôm nay`,
+với MA20 hôm nay = (19 giá đóng cửa trước + giá khớp hiện tại) / 20. Trong phiên tín hiệu có thể bật/tắt khi giá
+dao động quanh MA20; chỉ xác nhận khi đóng cửa.
+
+### Cảnh báo (tab 🔔)
+Kiểm tra trên **server** theo từng lệnh khớp (vẫn chạy khi đóng trình duyệt). Loại: giá ≥/≤, % thay đổi, tổng KL,
+KL/TB20, RSI ≥/≤, **giá cắt lên MA20**, cắt xuống MA20, MACD cắt lên. Thông báo: toast + thông báo trình duyệt
++ tiếng bíp, và Telegram (đặt `TELEGRAM_BOT_TOKEN` trên server, nhập chat ID khi tạo cảnh báo).
+Chống nhiễu: mỗi cảnh báo cách nhau tối thiểu `ALERT_COOLDOWN_MS` (mặc định 15 phút); tín hiệu trùng bị gộp trong `SIGNAL_DEDUPE_MS`.
+Cảnh báo gắn với ID ẩn danh của trình duyệt (chưa có đăng nhập).
+
+### Biểu đồ chỉ báo
+MA20, MA50, Bollinger(20,2), RSI(14), MACD(12,26,9), mũi tên MUA/BÁN tại các điểm giá đóng cửa cắt MA20; nến cuối và
+chỉ báo cập nhật realtime. Nút tạo cảnh báo nhanh ngay trong khung chi tiết mã.
+
+Mã nguồn chỉ báo dùng chung server/web: `shared/indicators.js` (kiểm thử: `npm test`).
+
 ## Kiến trúc
 
 ```
@@ -48,6 +73,9 @@ Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localho
 | `RESYNC_MS` | 60000 | Chu kỳ đối soát snapshot |
 | `STALE_MS` | 30000 | Ngưỡng coi feed bị treo |
 | `VOL_MULT` | 10 | VPS trả KL theo lô 10 CP |
+| `ALERT_COOLDOWN_MS` | 900000 | Khoảng cách tối thiểu giữa 2 lần báo của 1 cảnh báo |
+| `SIGNAL_DEDUPE_MS` | 900000 | Gộp tín hiệu trùng mã/loại |
+| `TELEGRAM_BOT_TOKEN` | — | Bật gửi cảnh báo qua Telegram |
 
 ### API
 - `GET /api/health` – trạng thái feed, số mã, phiên
@@ -55,6 +83,9 @@ Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localho
 - `GET /api/stock/:sym` – snapshot 1 mã
 - `GET /api/indices` – các chỉ số
 - `GET /api/history?symbol=FPT&resolution=1D&from=&to=` – nến (1, 5, 15, 30, 1H, 1D, 1W)
+- `GET /api/screener` – chỉ báo + tín hiệu của toàn thị trường
+- `GET /api/signals` – nhật ký tín hiệu trong ngày
+- `GET/POST /api/alerts`, `PATCH/DELETE /api/alerts/:id`, `GET /api/alerts/history` (header `x-client-id`)
 - `WS /ws` – gửi `{"op":"sub","syms":["FPT","VNM"]}`; nhận `hello`, `snap`, `q` (thay đổi), `ix` (chỉ số), `status`, `pong`
 
 ## ⚠️ Lưu ý pháp lý về nguồn dữ liệu

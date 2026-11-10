@@ -1,0 +1,16 @@
+# Cấu hình triển khai 1-click lên Render.com (gói miễn phí)
+services:
+  - type: web
+    name: vn-stock
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm run install:all && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: PROVIDER
+        value: vps

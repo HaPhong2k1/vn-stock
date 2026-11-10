@@ -3,6 +3,13 @@
 Bảng giá realtime HOSE / HNX / UPCOM (~1.500 mã), chỉ số VN-INDEX, VN30, HNX, HNX30, UPCOM,
 biểu đồ nến cập nhật theo từng lệnh khớp, sổ lệnh 3 bước giá, giao dịch khối ngoại, danh mục theo dõi.
 
+## Đưa lên mạng (không cần cài gì)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HaPhong2k1/vn-stock)
+
+Bấm nút → đăng nhập Render bằng GitHub → **Apply**. Khoảng 3–5 phút sau sẽ có link dạng `https://vn-stock-xxxx.onrender.com`.
+Gói miễn phí: server "ngủ" sau 15 phút không có ai truy cập (lần mở sau chờ ~1 phút), cảnh báo đã tạo có thể mất khi server khởi động lại.
+
 ## Chạy nhanh
 
 ```bash

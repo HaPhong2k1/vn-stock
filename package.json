@@ -9,5 +9,8 @@
     "dev:server": "npm --prefix server run dev",
     "dev:web": "npm --prefix web run dev",
     "test": "npm --prefix server test"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

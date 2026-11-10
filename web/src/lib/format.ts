@@ -3,7 +3,7 @@ import type { Stock } from './types';
 export const fmtPrice = (v: number | string | undefined) => {
   if (v === undefined || v === null || v === 0 || v === '0') return '';
   if (typeof v === 'string') return v;           // ATO / ATC
-  return v.toFixed(2);
+  return v >= 1000 ? v.toFixed(1) : v.toFixed(2); // phái sinh (điểm) hiển thị 1 số lẻ
 };
 export const fmtVol = (v: number | undefined) => (!v ? '' : v.toLocaleString('vi-VN'));
 export const fmtBig = (v: number | undefined) => {

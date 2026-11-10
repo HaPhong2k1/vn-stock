@@ -48,10 +48,10 @@ main.with-detail .board { flex: 1; }
 
 /* Bảng giá: 30 cột cố định */
 .board { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-x: auto; background: var(--panel); }
-.board .head, .board .body > div { min-width: 1500px; }
+.board .head, .board .body > div { min-width: 1560px; }
 .row, .hrow {
   display: grid;
-  grid-template-columns: 72px repeat(3, 50px) repeat(6, 1fr) 56px 1fr 54px 58px repeat(6, 1fr) 88px repeat(3, 50px) repeat(3, 1fr);
+  grid-template-columns: 86px repeat(3, 56px) repeat(6, 1fr) 60px 1fr 54px 58px repeat(6, 1fr) 88px repeat(3, 56px) repeat(3, 1fr);
 }
 .head { background: var(--head); border-bottom: 1px solid var(--line); font-weight: 600; color: var(--muted); }
 .hrow .cell { text-align: center; padding: 4px 2px; border-right: 1px solid var(--line); }
@@ -171,3 +171,12 @@ main.wide .chart { height: 480px; }
 .bt-stats span { color: var(--muted); font-size: 11px; } .bt-stats b { font-size: 15px; font-variant-numeric: tabular-nums; } .bt-stats small { color: var(--muted); }
 .bt-eq { width: 100%; height: 60px; color: var(--floor); }
 .bt-trades { max-height: 220px; overflow: auto; }
+
+/* ---- Phái sinh & toàn màn hình ---- */
+.index-card.fut { cursor: pointer; background: var(--head); border-radius: 6px; border-left: 0; }
+.expand { border: 1px solid var(--line); background: var(--bg); border-radius: 4px; padding: 3px 10px; font-weight: 600; white-space: nowrap; }
+.expand:hover { background: var(--head); }
+.detail.full { position: fixed; inset: 0; z-index: 50; width: 100% !important; border: 0; }
+.detail.full .chart { height: calc(100vh - 330px); min-height: 320px; }
+.detail.full .chart.osc { height: 150px; min-height: 0; }
+.detail.full .detail-grid { grid-template-columns: 1fr 1fr; }

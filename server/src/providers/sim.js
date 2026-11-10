@@ -2,6 +2,7 @@ import { VpsProvider } from './vps.js';
 
 /** Bước giá theo quy định sàn (nghìn đồng) */
 export function tickSize(ex, price) {
+  if (ex === 'PS') return 0.1;
   if (ex === 'HOSE') return price < 10 ? 0.01 : price < 50 ? 0.05 : 0.1;
   return 0.1;
 }
@@ -40,7 +41,7 @@ export class SimProvider extends VpsProvider {
     const base = st.last || st.ref;
     let p = round(base + (Math.floor(Math.random() * 5) - 2) * t, t);
     p = Math.min(st.ceil, Math.max(st.floor, p));
-    const vol = (1 + Math.floor(Math.random() * 50)) * 100;
+    const vol = st.ex === 'PS' ? 1 + Math.floor(Math.random() * 30) : (1 + Math.floor(Math.random() * 50)) * 100;
     const b = [0, 1, 2].map((i) => [round(p - t * (i + 1), t), (1 + Math.floor(Math.random() * 300)) * 100]);
     const a = [0, 1, 2].map((i) => [round(p + t * i, t), (1 + Math.floor(Math.random() * 300)) * 100]);
     const now = new Date(Date.now() + 7 * 3600_000).toISOString().slice(11, 19);

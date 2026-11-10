@@ -57,7 +57,7 @@ export const Row = memo(function Row({ sym, top, watched, onPick, onToggleWatch 
       <div className={`cell num ${pc(st.avg)}`}>{fmtPrice(st.avg)}</div>
       <div className="cell num" data-k="fB">{fmtVol(st.fB)}</div>
       <div className="cell num" data-k="fS">{fmtVol(st.fS)}</div>
-      <div className="cell num">{fmtVol(st.room)}</div>
+      <div className="cell num" title={st.ex === 'PS' ? `OI (khối lượng mở) · HĐ ${st.code} · đáo hạn ${st.mat}` : 'Room NN còn lại'}>{fmtVol(st.ex === 'PS' ? st.oi : st.room)}</div>
     </div>
   );
 });

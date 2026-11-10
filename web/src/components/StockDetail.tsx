@@ -30,7 +30,7 @@ const T = (t: number) => (t + VN) as UTCTimestamp;
 const line = (bars: Bar[], vals: (number | null)[]) =>
   bars.map((b, i) => (vals[i] === null ? { time: T(b.time) } : { time: T(b.time), value: vals[i] as number }));
 
-export function StockDetail({ sym, onClose, wide, onWide }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void }) {
+export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void; full: boolean; onFull: () => void }) {
   const st = useStock(sym);
   const [res, setRes] = useState<string>('1D');
   const [ov, setOv] = useState({ ma20: true, ma50: true, bb: false, signals: true });
@@ -218,14 +218,15 @@ export function StockDetail({ sym, onClose, wide, onWide }: { sym: string; onClo
   const pc = (p: any) => (st ? priceClass(p, st) : '');
   const f2 = (v?: number | null) => (v === null || v === undefined ? '—' : v.toFixed(2));
   return (
-    <div className="detail">
+    <div className={`detail${full ? ' full' : ''}`}>
       <div className="detail-head">
         <div>
-          <b className="d-sym">{sym}</b> <span className="muted">{st?.ex}</span>
+          <b className="d-sym">{sym}</b> <span className="muted">{st?.ex === 'PS' ? `Phái sinh · HĐ ${st.code} · đáo hạn ${st.mat?.split('-').reverse().join('/')}` : st?.ex}</span>
           {st && <span className={`d-price ${pc(st.last)}`}>{fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
         </div>
         <div>
-          <button className="close" title={wide ? 'Thu nhỏ' : 'Phóng to'} onClick={onWide}>{wide ? '⇥' : '⇤'}</button>
+          <button className="expand" title={full ? 'Thoát toàn màn hình (Esc)' : 'Mở rộng biểu đồ toàn màn hình'} onClick={onFull}>{full ? '🗗 Thu nhỏ' : '⛶ Toàn màn hình'}</button>
+          {!full && <button className="close" title={wide ? 'Thu hẹp khung' : 'Nới rộng khung'} onClick={onWide}>{wide ? '⇥' : '⇤'}</button>}
           <button className="close" onClick={onClose}>✕</button>
         </div>
       </div>
@@ -293,7 +294,8 @@ export function StockDetail({ sym, onClose, wide, onWide }: { sym: string; onClo
             <dt>Mở cửa</dt><dd className={pc(st.open)}>{fmtPrice(st.open)}</dd>
             <dt>Cao / Thấp</dt><dd><span className={pc(st.high)}>{fmtPrice(st.high)}</span> / <span className={pc(st.low)}>{fmtPrice(st.low)}</span></dd>
             <dt>Tổng KL</dt><dd>{fmtVol(st.totVol)}</dd>
-            <dt>Giá trị ước tính</dt><dd>{st.avg && st.totVol ? ((st.avg * st.totVol) / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' tỷ' : ''}</dd>
+            <dt>Giá trị ước tính</dt><dd>{st.avg && st.totVol ? ((st.ex === 'PS' ? (st.avg * st.totVol * 100_000) / 1e9 : (st.avg * st.totVol) / 1e6)).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' tỷ' : ''}</dd>
+            {st.ex === 'PS' && <><dt>OI (KL mở)</dt><dd>{fmtVol(st.oi)}</dd></>}
             <dt>NN mua / bán</dt><dd>{fmtVol(st.fB)} / {fmtVol(st.fS)}</dd>
             <dt>NN ròng</dt><dd className={st.fB - st.fS >= 0 ? 'c-up' : 'c-down'}>{fmtVol(st.fB - st.fS)}</dd>
           </dl>

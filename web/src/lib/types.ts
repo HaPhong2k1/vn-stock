@@ -3,6 +3,7 @@ export interface Stock {
   s: string; ex: string; ref: number; ceil: number; floor: number; open: number;
   last: number; lastVol: number; chg: number; chgPc: number; high: number; low: number; avg: number;
   totVol: number; b: Level[]; a: Level[]; fB: number; fS: number; room: number; t: string; seq: number; u: number;
+  oi?: number; code?: string; mat?: string;
 }
 export interface Index {
   code: string; name: string; value: number; chg: number; chgPc: number; vol: number; val: number;

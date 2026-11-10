@@ -12,7 +12,7 @@ export async function getHistory({ symbol, resolution = '1D', from, to }) {
   const now = Math.floor(Date.now() / 1000);
   to = Number(to) || now;
   from = Number(from) || to - (resolution.endsWith('D') || resolution === '1W' ? 365 * 2 : 5) * 86400;
-  const kind = INDEX.has(symbol) ? 'index' : 'stock';
+  const kind = INDEX.has(symbol) ? 'index' : /^VN30F/.test(symbol) ? 'derivative' : 'stock';
   const key = `${kind}:${symbol}:${resolution}:${from}:${Math.floor(to / 30)}`; // cache 30s
   const hit = cache.get(key);
   if (hit && hit.exp > Date.now()) return hit.data;

@@ -2,7 +2,15 @@ import io from 'socket.io-client';
 import { config } from '../config.js';
 import { isTradingActive } from '../market-hours.js';
 
-const EX = { STO: 'HOSE', STX: 'HNX', UPX: 'UPCOM' };
+const EX = { STO: 'HOSE', STX: 'HNX', UPX: 'UPCOM', DVX: 'PS' };
+// Hợp đồng tương lai VN30: mã KRX (VD 41I1GB000) -> mã quen thuộc theo kỳ hạn
+const DERIV_ALIASES = ['VN30F1M', 'VN30F2M', 'VN30F1Q', 'VN30F2Q'];
+const vnToday = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
+/** Phiên phái sinh: 8:45–14:45 (T2–T6) */
+function derivActive() {
+  const d = new Date(Date.now() + 7 * 3600_000), m = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return ![0, 6].includes(d.getUTCDay()) && m >= 8 * 60 + 44 && m <= 14 * 60 + 46 && !(m > 11 * 60 + 31 && m < 12 * 60 + 59);
+}
 const num = (v) => {
   if (v === null || v === undefined || v === '') return undefined;
   const n = typeof v === 'number' ? v : parseFloat(v);
@@ -10,17 +18,17 @@ const num = (v) => {
 };
 
 /** "50.9|8780|d" -> [50.9, 87800]; giá có thể là "ATO"/"ATC" */
-function level(str) {
+function levelM(str, mult = config.volMult) {
   if (typeof str !== 'string' || !str) return undefined;
   const [p, v] = str.split('|');
   const price = num(p) ?? p;          // giữ nguyên "ATO"/"ATC"
-  return [price === 0 ? 0 : price, (num(v) || 0) * config.volMult];
+  return [price === 0 ? 0 : price, (num(v) || 0) * mult];
 }
 
 /** Chuẩn hoá bản ghi VPS (snapshot REST hoặc message socket) -> patch nội bộ */
-export function normalizeVps(x) {
+export function normalizeVps(x, m = x?.marketId === 'DVX' ? 1 : config.volMult) {
   const p = {};
-  const m = config.volMult;
+  const level = (str) => levelM(str, m);
   if (x.marketId && EX[x.marketId]) p.ex = EX[x.marketId];
   if (num(x.r) !== undefined) p.ref = num(x.r);
   if (num(x.c) !== undefined) p.ceil = num(x.c);
@@ -38,6 +46,7 @@ export function normalizeVps(x) {
   const fs = num(x.fSVolume ?? x.fSVol); if (fs !== undefined) p.fS = fs * m;
   const room = num(x.fRoom); if (room !== undefined) p.room = room; // room NN tính theo cổ phiếu
   if (x.time) p.t = String(x.time);
+  const oi = num(x.oi); if (oi !== undefined && m === 1) p.oi = oi; // khối lượng mở (phái sinh)
 
   // Snapshot: g1-g3 = dư mua (tốt nhất trước), g4-g6 = dư bán
   if (!x.side && x.g4 !== undefined) {
@@ -101,6 +110,49 @@ export class VpsProvider {
     for (const [ex, list] of [['HOSE', hose], ['HNX', hnx], ['UPCOM', upcom]]) {
       for (const s of list) this.store.patchStock(s, { ex }, { source: 'snapshot' });
     }
+    await this.loadDerivatives().catch((e) => this.log.warn('[vps] phái sinh lỗi', e.message));
+  }
+
+  /** Xác định VN30F1M/F2M/F1Q/F2Q = các HĐ tương lai VN30 còn hiệu lực, xếp theo ngày đáo hạn */
+  async loadDerivatives() {
+    const r = config.vps.rest;
+    const all = await getJSON(`${r}/getlistallstock`);
+    const codes = (all || []).filter((x) => x.type === 'D' && /^41I1/.test(x.stock_code)).map((x) => x.stock_code);
+    if (!codes.length) return;
+    const rows = await getJSON(`${r}/getpsalldatalsnapshot/${codes.join(',')}`);
+    const today = vnToday();
+    const live = (rows || []).map((x) => ({ x, mat: String(x.matureDate || '').split('/').reverse().join('-') }))
+      .filter((c) => c.mat && c.mat >= today).sort((a, b) => a.mat.localeCompare(b.mat));
+    const next = new Map(live.slice(0, DERIV_ALIASES.length).map((c, i) => [c.x.sym, DERIV_ALIASES[i]]));
+    const prev = this.derivAlias || new Map();
+    this.derivAlias = next;
+    this.derivCodes = [...next.keys()];
+    this.store.groups.PS = DERIV_ALIASES.filter((a) => [...next.values()].includes(a));
+    for (const c of live.slice(0, DERIV_ALIASES.length)) {
+      const alias = next.get(c.x.sym);
+      // chuyển kỳ hạn (rollover): HĐ khác => tạo lại dòng để không lẫn dữ liệu HĐ cũ
+      if ([...prev.entries()].some(([code, a]) => a === alias && code !== c.x.sym)) this.store.stocks.delete(alias);
+      this.store.patchStock(alias, { ...normalizeVps(c.x, 1), ex: 'PS', code: c.x.sym, mat: c.mat }, { source: 'snapshot' });
+    }
+    if (this.socket?.connected && this.derivCodes.length) this.socket.emit('regs', JSON.stringify({ action: 'join', list: this.derivCodes.join(',') }));
+    this.log.info(`[vps] phái sinh: ${[...next].map(([c, a]) => `${a}=${c}`).join(', ')}`);
+  }
+
+  /** Cập nhật phái sinh từ snapshot REST (dự phòng cho socket, 2s/lần trong phiên) */
+  async pollDerivatives() {
+    if (!this.derivCodes?.length) return;
+    const rows = await getJSON(`${config.vps.rest}/getpsalldatalsnapshot/${this.derivCodes.join(',')}`, 0);
+    for (const x of rows || []) this.applyDeriv(x);
+  }
+
+  applyDeriv(x) {
+    const alias = this.derivAlias?.get(x?.sym);
+    if (!alias) return false;
+    const patch = normalizeVps(x, 1);
+    const cur = this.store.stocks.get(alias);
+    if (cur && patch.totVol !== undefined && patch.totVol < cur.totVol) return true; // dữ liệu cũ hơn
+    this.store.patchStock(alias, patch);
+    return true;
   }
 
   /** Đối soát: tải lại toàn bộ snapshot. Chỉ áp dụng nếu snapshot không "cũ" hơn dữ liệu socket. */
@@ -121,6 +173,7 @@ export class VpsProvider {
         }
       } catch (e) { this.status.errors++; this.log.warn('[vps] snapshot lỗi', e.message); }
     }
+    try { await this.pollDerivatives(); } catch (e) { this.status.errors++; this.log.warn('[vps] phái sinh lỗi', e.message); }
     try {
       const idx = await getJSON(`${r}/getlistindexdetail/10,11,02,12,03`);
       for (const x of idx || []) if (x?.mc) this.store.patchIndex(x.mc, normalizeVpsIndex(x), { source: 'snapshot' });
@@ -142,6 +195,7 @@ export class VpsProvider {
       for (const part of chunk(this.symbols, 200)) {
         s.emit('regs', JSON.stringify({ action: 'join', list: part.join(',') }));
       }
+      if (this.derivCodes?.length) s.emit('regs', JSON.stringify({ action: 'join', list: this.derivCodes.join(',') }));
       // Sau mỗi lần (re)connect phải đối soát để bù các message bị lỡ
       this.resync().catch(() => {});
     });
@@ -152,11 +206,13 @@ export class VpsProvider {
       const x = d?.data ?? d;
       if (!x?.sym) return;
       this.status.lastMsgAt = Date.now();
+      if (this.applyDeriv({ ...x, marketId: 'DVX' })) return; // phái sinh: KL theo hợp đồng
       this.store.patchStock(x.sym, normalizeVps(x));
     };
     s.on('stock', onStock);
     s.on('board', onStock);
-    s.on('stockps', () => { this.status.lastMsgAt = Date.now(); }); // thỏa thuận: bỏ qua trên bảng khớp lệnh
+    s.on('stockps', onStock); // phái sinh
+    s.on('boardps', onStock);
     s.on('index', (d) => {
       const x = d?.data ?? d;
       if (!x?.mc) return;
@@ -171,6 +227,9 @@ export class VpsProvider {
     this.connectSocket();
     // Đối soát định kỳ trong giờ giao dịch
     setInterval(() => { if (isTradingActive()) this.resync().catch(() => {}); }, config.resyncMs);
+    setInterval(() => { if (derivActive()) this.pollDerivatives().catch(() => {}); }, 2_000);
+    // kiểm tra chuyển kỳ hạn HĐ tương lai
+    setInterval(() => this.loadDerivatives().catch(() => {}), 30 * 60_000);
     // Watchdog: socket "im lặng" bất thường => kết nối lại
     setInterval(() => {
       if (!isTradingActive()) return;

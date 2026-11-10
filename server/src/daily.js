@@ -54,7 +54,8 @@ export class DailyStore {
 
   async fetchOne(sym, today) {
     const to = Math.floor(Date.now() / 1000);
-    const url = `${config.historyApi}/stock?symbol=${sym}&resolution=1D&from=${to - DAYS * 86400}&to=${to}`;
+    const kind = /^VN30F/.test(sym) ? 'derivative' : 'stock';
+    const url = `${config.historyApi}/${kind}?symbol=${sym}&resolution=1D&from=${to - DAYS * 86400}&to=${to}`;
     for (let i = 0; i < 3; i++) {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
@@ -101,7 +102,10 @@ export class DailyStore {
   schedule(getSymbols) {
     const check = () => {
       const syms = getSymbols();
-      if (syms.length && this.asOf !== prevTradingDay() && !this.loading) this.refresh(syms).catch((e) => this.log.warn('[daily]', e.message));
+      if (!syms.length || this.loading) return;
+      if (this.asOf !== prevTradingDay()) { this.refresh(syms).catch((e) => this.log.warn('[daily]', e.message)); return; }
+      const missing = syms.filter((x) => !this.bars.has(x)); // mã mới (VD phái sinh) chưa có trong cache
+      if (missing.length) this.refresh(missing).catch((e) => this.log.warn('[daily]', e.message));
     };
     check();
     setInterval(check, 10 * 60_000);

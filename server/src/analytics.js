@@ -60,7 +60,8 @@ export class Analytics extends EventEmitter {
     const lo52 = Math.min(...h.l.slice(-250).filter((x) => x > 0), live && st.low ? st.low : Infinity);
 
     const m = {
-      s: sym, ex: st.ex, price, chgPc: st.chgPc, totVol: st.totVol, value: st.avg * st.totVol / 1e6, // tỷ đồng
+      s: sym, ex: st.ex, price, chgPc: st.chgPc, totVol: st.totVol,
+      value: st.ex === 'PS' ? (st.avg * st.totVol * 100_000) / 1e9 : st.avg * st.totVol / 1e6, // tỷ đồng (HĐ VN30F: 100.000đ/điểm)
       ma20: r2(ma20[n]), ma50: r2(ma50[n]), ma200: r2(ma200[n]), ema9: r2(e9[n]), ema21: r2(e21[n]),
       rsi14: r2(rs[n]), macd: r2(md.line[n]), macdSig: r2(md.signal[n]), macdHist: r2(md.hist[n]),
       bbUp: r2(bb.upper[n]), bbLow: r2(bb.lower[n]),

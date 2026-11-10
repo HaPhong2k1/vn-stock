@@ -28,6 +28,11 @@ npm run start:sim      # chế độ giả lập: lấy snapshot thật rồi si
 
 Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localhost:5173, proxy `/api` và `/ws`).
 
+## Phái sinh VN30F
+Tab **Phái sinh**: VN30F1M, VN30F2M, VN30F1Q, VN30F2Q (tự ánh xạ sang mã HĐ KRX, VD `41I1GB000`, và tự chuyển kỳ hạn khi đáo hạn).
+Thẻ VN30F1M trên thanh chỉ số hiển thị giá, KL, OI và basis so với VN30. Giá theo điểm, KL theo hợp đồng
+(giá trị = điểm × 100.000đ). Dữ liệu: socket VPS + snapshot REST 2 giây/lần trong phiên 8:45–14:45 làm dự phòng.
+
 ## Tính năng phân tích
 
 ### Bộ lọc cổ phiếu (tab 🔎)

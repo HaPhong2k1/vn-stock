@@ -51,6 +51,18 @@ Cảnh báo gắn với ID ẩn danh của trình duyệt (chưa có đăng nh�
 MA20, MA50, Bollinger(20,2), RSI(14), MACD(12,26,9), mũi tên MUA/BÁN tại các điểm giá đóng cửa cắt MA20; nến cuối và
 chỉ báo cập nhật realtime. Nút tạo cảnh báo nhanh ngay trong khung chi tiết mã.
 
+### Smart Money Concepts (LuxAlgo) & EMA cross
+- **SMC** (nút ◆ SMC + ⚙ trong khung chi tiết mã): BOS/CHoCH nội bộ & swing, order block (nội bộ/swing, lọc ATR(200),
+  tự xoá khi bị phá), EQH/EQL, Fair Value Gap, Strong/Weak High/Low, vùng Premium/Discount, tô màu nến, chế độ Historical/Present.
+  Bộ lọc & cảnh báo: *SMC CHoCH tăng/giảm*, *BOS tăng*, *xu hướng swing tăng* (nến ngày).
+- **EMA cross BUY/SELL** (EMA10/EMA20, chỉnh được): nhãn BUY/SELL trên biểu đồ, vùng tô giữa 2 EMA và **backtest**
+  (vốn, phí, thuế bán, T+2, chế độ chỉ mua hoặc mua & bán khống; khớp giá mở cửa nến kế tiếp). Bộ lọc & cảnh báo EMA10↑EMA20.
+
+> ⚖️ `shared/smc.js` là bản chuyển đổi từ *Smart Money Concepts [LuxAlgo]* © LuxAlgo, giấy phép
+> [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): phải ghi nguồn, **không dùng thương mại**,
+> chia sẻ lại theo cùng giấy phép. Nếu muốn kinh doanh web này, cần bỏ/thay thế phần SMC hoặc xin phép LuxAlgo.
+> Chiến lược EMA cross được viết lại độc lập theo ý tưởng của che_trader.
+
 Mã nguồn chỉ báo dùng chung server/web: `shared/indicators.js` (kiểm thử: `npm test`).
 
 ## Kiến trúc

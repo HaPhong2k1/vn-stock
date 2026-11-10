@@ -13,6 +13,11 @@ const PRESETS: { key: string; label: string; hint: string; test: Pred }[] = [
   { key: 'vol2x', label: 'KL đột biến (≥2× TB20)', hint: 'KL hôm nay ≥ 2 lần TB 20 phiên', test: (m) => (m.volRatio || 0) >= 2 },
   { key: 'macd', label: 'MACD cắt lên', hint: 'Histogram MACD chuyển từ âm sang dương', test: (m) => m.macdCrossUp },
   { key: 'ema', label: 'EMA9 cắt lên EMA21', hint: 'EMA9 vượt EMA21 phiên này', test: (m) => m.ema9CrossUp },
+  { key: 'emaUp', label: '🟢 EMA10 cắt lên EMA20 (BUY)', hint: 'Chiến lược EMA cross (che_trader): EMA10 vượt EMA20 phiên này', test: (m) => m.emaCrossUp },
+  { key: 'emaDown', label: '🔴 EMA10 cắt xuống EMA20 (SELL)', hint: 'EMA10 xuống dưới EMA20 phiên này', test: (m) => m.emaCrossDown },
+  { key: 'smcChochUp', label: '◆ SMC: CHoCH tăng', hint: 'Smart Money Concepts (LuxAlgo): đổi cấu trúc sang tăng ở phiên này', test: (m) => m.smcBullChoch },
+  { key: 'smcBosUp', label: '◆ SMC: BOS tăng', hint: 'Phá vỡ cấu trúc tăng (tiếp diễn) ở phiên này', test: (m) => m.smcBullBos },
+  { key: 'smcTrendUp', label: '◆ SMC: xu hướng swing tăng', hint: 'Cấu trúc swing gần nhất là tăng', test: (m) => m.smcSwingTrend === 1 },
   { key: 'golden', label: 'Golden cross', hint: 'MA50 cắt lên MA200', test: (m) => m.goldenCross },
   { key: 'bbLow', label: 'Chạm dải Bollinger dưới', hint: 'Giá ≤ BB dưới', test: (m) => m.bbLow !== null && m.price <= m.bbLow },
   { key: 'hi52', label: 'Đỉnh 52 tuần', hint: 'Giá ≥ 99% đỉnh 52 tuần', test: (m) => !!m.hi52 && m.price >= m.hi52 * 0.99 },
@@ -112,7 +117,12 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
                   {m.ma20CrossUp && <span className="tag buy">MUA · MA20↑</span>}
                   {m.ma20CrossDown && <span className="tag sell">MA20↓</span>}
                   {m.macdCrossUp && <span className="tag">MACD↑</span>}
-                  {m.ema9CrossUp && <span className="tag">EMA↑</span>}
+                  {m.ema9CrossUp && <span className="tag">EMA9↑</span>}
+                  {m.emaCrossUp && <span className="tag buy">BUY · EMA10↑20</span>}
+                  {m.emaCrossDown && <span className="tag sell">SELL · EMA10↓20</span>}
+                  {m.smcBullChoch && <span className="tag buy">CHoCH↑</span>}
+                  {m.smcBearChoch && <span className="tag sell">CHoCH↓</span>}
+                  {m.smcBullBos && <span className="tag">BOS↑</span>}
                   {m.goldenCross && <span className="tag">Golden</span>}
                 </td>
                 <td><button className="icon" title="Tạo cảnh báo" onClick={(e) => { e.stopPropagation(); onQuickAlert(m.s); }}>🔔</button></td>

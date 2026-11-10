@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { sma, ema, rsi, macd, bollinger } from '../../shared/indicators.js';
+import { computeSMC, smcLastBarSignals } from '../../shared/smc.js';
+import { emaTV } from '../../shared/strategy.js';
 import { todayStarted, vnDate } from './daily.js';
 import { isTradingActive } from './market-hours.js';
 
@@ -39,6 +41,11 @@ export class Analytics extends EventEmitter {
     const live = todayStarted() && st.last > 0;
     const closes = live ? [...h.c, st.last] : h.c;
     const vols = live ? [...h.v, st.totVol] : h.v;
+    // nến ngày đầy đủ cho SMC (nến hôm nay từ realtime)
+    const bars = h.c.map((c, i) => ({ time: h.t[i], open: h.o ? h.o[i] : h.c[i - 1] ?? c, high: h.h[i], low: h.l[i], close: c }));
+    if (live) bars.push({ time: Math.floor(Date.now() / 1000), open: st.open || st.last, high: st.high || st.last, low: st.low || st.last, close: st.last });
+    const smc = smcLastBarSignals(computeSMC(bars));
+    const ef = emaTV(closes, 10), es = emaTV(closes, 20);
     const n = closes.length - 1;
     const ma20 = sma(closes, 20), ma50 = sma(closes, 50), ma200 = sma(closes, 200);
     const e9 = ema(closes, 9), e21 = ema(closes, 21);
@@ -67,6 +74,10 @@ export class Analytics extends EventEmitter {
       ma20CrossDown: ma20[n] !== null && ma20[n - 1] !== null && prevClose >= ma20[n - 1] && price < ma20[n],
       macdCrossUp: md.hist[n] !== null && md.hist[n - 1] !== null && md.hist[n - 1] <= 0 && md.hist[n] > 0,
       ema9CrossUp: e9[n] !== null && e9[n - 1] !== null && e9[n - 1] <= e21[n - 1] && e9[n] > e21[n],
+      ema10: r2(ef[n]), ema20: r2(es[n]),
+      emaCrossUp: n > 0 && ef[n] > es[n] && ef[n - 1] <= es[n - 1],
+      emaCrossDown: n > 0 && ef[n] < es[n] && ef[n - 1] >= es[n - 1],
+      ...smc,
       goldenCross: ma50[n] !== null && ma200[n - 1] !== null && ma50[n - 1] <= ma200[n - 1] && ma50[n] > ma200[n],
       u: Date.now(),
     };
@@ -78,6 +89,11 @@ export class Analytics extends EventEmitter {
       if (!prev.aboveMa20 && m.aboveMa20) this.pushSignal('MA20_CROSS_UP', m);
       if (prev.aboveMa20 && !m.aboveMa20) this.pushSignal('MA20_CROSS_DOWN', m);
       if (!prev.macdCrossUp && m.macdCrossUp) this.pushSignal('MACD_CROSS_UP', m);
+      if (!prev.emaCrossUp && m.emaCrossUp) this.pushSignal('EMA_CROSS_UP', m);
+      if (!prev.emaCrossDown && m.emaCrossDown) this.pushSignal('EMA_CROSS_DOWN', m);
+      if (!prev.smcBullChoch && m.smcBullChoch) this.pushSignal('SMC_BULL_CHOCH', m);
+      if (!prev.smcBearChoch && m.smcBearChoch) this.pushSignal('SMC_BEAR_CHOCH', m);
+      if (!prev.smcBullBos && m.smcBullBos) this.pushSignal('SMC_BULL_BOS', m);
     }
     this.emit('metrics', m, prev);
   }

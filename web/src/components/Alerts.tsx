@@ -113,7 +113,7 @@ export function Alerts({ initialSym, onPick }: Props) {
               <li key={s.id}>
                 <span className="muted">{time(s.at)}</span>{' '}
                 <a onClick={() => onPick(s.s)}><b>{s.s}</b></a>{' '}
-                <span className={`tag ${s.type === 'MA20_CROSS_UP' ? 'buy' : s.type === 'MA20_CROSS_DOWN' ? 'sell' : ''}`}>{SIGNAL_LABELS[s.type] || s.type}</span>{' '}
+                <span className={`tag ${/UP|BULL/.test(s.type) ? 'buy' : /DOWN|BEAR/.test(s.type) ? 'sell' : ''}`}>{SIGNAL_LABELS[s.type] || s.type}</span>{' '}
                 giá {s.price} · MA20 {s.ma20 ?? '—'} · RSI {s.rsi14 ?? '—'} · KL {s.volRatio ?? '—'}×
               </li>
             ))}

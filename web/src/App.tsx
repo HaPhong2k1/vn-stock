@@ -25,6 +25,7 @@ export default function App() {
   const [q, setQ] = useState('');
   const [pick, setPick] = useState<string | null>(null);
   const [view, setView] = useState<string>('board');
+  const [wide, setWide] = useState(false);
   const [alertSym, setAlertSym] = useState<string | undefined>();
   const watchSet = useMemo(() => new Set(watch), [watch]);
 
@@ -68,11 +69,11 @@ export default function App() {
           onKeyDown={(e) => e.key === 'Enter' && onSearchEnter()} />
         <span className="muted count">{syms.length} mã · Giá: nghìn đồng · KL: cổ phiếu</span>
       </nav>}
-      <main className={pick ? 'with-detail' : ''}>
+      <main className={pick ? `with-detail${wide ? ' wide' : ''}` : ''}>
         {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={setPick} onToggleWatch={toggleWatch} />}
         {view === 'screener' && <Screener watch={watchSet} onPick={setPick} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
         {view === 'alerts' && <Alerts initialSym={alertSym} onPick={setPick} />}
-        {pick && <StockDetail key={pick} sym={pick} onClose={() => setPick(null)} />}
+        {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} onClose={() => setPick(null)} />}
       </main>
       <StatusBar />
       <Toasts />

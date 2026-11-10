@@ -39,6 +39,8 @@ export class DailyStore {
   loadCache() {
     try {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      const first = Object.values(j.bars)[0];
+      if (!first?.o) { this.log.info('[daily] cache định dạng cũ (thiếu giá mở cửa) → tải lại'); return; }
       this.asOf = j.asOf;
       for (const [s, b] of Object.entries(j.bars)) this.bars.set(s, b);
       this.log.info(`[daily] cache ${this.bars.size} mã, đến ngày ${this.asOf}`);
@@ -58,10 +60,10 @@ export class DailyStore {
         const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
-        const b = { t: [], c: [], h: [], l: [], v: [] };
+        const b = { t: [], o: [], c: [], h: [], l: [], v: [] };
         (j.t || []).forEach((t, k) => {
           if (vnDate(t * 1000) >= today) return; // bỏ phiên hôm nay (chưa chốt)
-          b.t.push(t); b.c.push(j.c[k]); b.h.push(j.h[k]); b.l.push(j.l[k]); b.v.push(j.v[k]);
+          b.t.push(t); b.o.push(j.o[k]); b.c.push(j.c[k]); b.h.push(j.h[k]); b.l.push(j.l[k]); b.v.push(j.v[k]);
         });
         return b;
       } catch (e) {

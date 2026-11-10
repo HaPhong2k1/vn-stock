@@ -4,6 +4,19 @@ import { sma, rsi, macd, bollinger, crossUp, crossDown } from '../../../shared/i
 import { useStock } from '../lib/hooks';
 import { fmtPrice, fmtVol, priceClass } from '../lib/format';
 import { api } from '../lib/api';
+import { computeSMC } from '../../../shared/smc.js';
+import { backtestEmaCross, BT_DEFAULTS, type BtOptions, type BtResult } from '../../../shared/strategy.js';
+import { drawOverlay, SMC_UI_DEFAULTS, type SmcSettings } from '../lib/smcDraw';
+import { Backtest } from './Backtest';
+
+const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
+const saveLS = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bỏ qua */ } };
+const SMC_OPTS: [keyof SmcSettings, string][] = [
+  ['internal', 'Cấu trúc nội bộ (internal)'], ['swing', 'Cấu trúc swing'], ['swingPoints', 'Điểm swing HH/HL/LH/LL'],
+  ['strongWeak', 'Strong/Weak High/Low'], ['internalOB', 'Order block nội bộ'], ['swingOB', 'Order block swing'],
+  ['eq', 'Đỉnh/đáy bằng (EQH/EQL)'], ['fvg', 'Fair Value Gap'], ['zones', 'Vùng Premium/Discount'], ['colorCandles', 'Tô màu nến theo xu hướng'],
+  ['confluence', 'Lọc confluence (internal)'],
+];
 
 const VN = 7 * 3600; // hiển thị giờ VN trên trục thời gian (thư viện dùng UTC)
 const RES = [['1', '1 phút'], ['5', '5 phút'], ['15', '15 phút'], ['1H', '1 giờ'], ['1D', 'Ngày'], ['1W', 'Tuần']] as const;
@@ -17,7 +30,7 @@ const T = (t: number) => (t + VN) as UTCTimestamp;
 const line = (bars: Bar[], vals: (number | null)[]) =>
   bars.map((b, i) => (vals[i] === null ? { time: T(b.time) } : { time: T(b.time), value: vals[i] as number }));
 
-export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void }) {
+export function StockDetail({ sym, onClose, wide, onWide }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void }) {
   const st = useStock(sym);
   const [res, setRes] = useState<string>('1D');
   const [ov, setOv] = useState({ ma20: true, ma50: true, bb: false, signals: true });
@@ -26,12 +39,30 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
   const [msg, setMsg] = useState('');
   const [legend, setLegend] = useState<{ ma20?: number | null; ma50?: number | null; rsi?: number | null; macd?: number | null }>({});
   const el = useRef<HTMLDivElement>(null);
+  const redrawRef = useRef<() => void>(() => {});
   const el2 = useRef<HTMLDivElement>(null);
   const s = useRef<Record<string, any>>({});
   const bars = useRef<Bar[]>([]);
   const lastTot = useRef(0);
-  const opts = useRef({ ov, osc });
-  opts.current = { ov, osc };
+  const [smcS, setSmcS] = useState<SmcSettings>(() => load('smc', SMC_UI_DEFAULTS));
+  const [ema, setEma] = useState(() => load('emaCross', { enabled: false, showBt: false }));
+  const [bt, setBt] = useState<BtOptions>(() => load('btOpts', BT_DEFAULTS as BtOptions));
+  const [btRes, setBtRes] = useState<BtResult | null>(null);
+  const [smcOpen, setSmcOpen] = useState(false);
+  useEffect(() => saveLS('smc', smcS), [smcS]);
+  useEffect(() => saveLS('emaCross', ema), [ema]);
+  useEffect(() => saveLS('btOpts', { ...bt, end: undefined }), [bt]);
+  const overlay = useRef<HTMLCanvasElement>(null);
+  const drawState = useRef<{ smc: any; idx: Map<number, number>; fill: any }>({ smc: null, idx: new Map(), fill: null });
+  const opts = useRef({ ov, osc, smcS, ema, bt });
+  opts.current = { ov, osc, smcS, ema, bt };
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const redraw = useCallback(() => {
+    const x = s.current;
+    if (!overlay.current || !x.chart) return;
+    const d = drawState.current;
+    drawOverlay(overlay.current, x.chart, x.candle, d.smc, opts.current.smcS, d.idx, d.fill, dark);
+  }, [dark]);
 
   // Tạo 2 biểu đồ: giá (+MA/BB/khối lượng) và dao động (RSI/MACD), đồng bộ trục thời gian
   useEffect(() => {
@@ -40,7 +71,7 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
       autoSize: true,
       layout: { background: { color: 'transparent' }, textColor: dark ? '#c9d1d9' : '#333' },
       grid: { vertLines: { color: dark ? '#222a35' : '#eee' }, horzLines: { color: dark ? '#222a35' : '#eee' } },
-      timeScale: { timeVisible: true, secondsVisible: false },
+      timeScale: { timeVisible: true, secondsVisible: false, lockVisibleTimeRangeOnResize: true },
     };
     const c = createChart(el.current!, { ...base, rightPriceScale: { scaleMargins: { top: 0.08, bottom: 0.22 } } });
     const c2 = createChart(el2.current!, { ...base, rightPriceScale: { minimumWidth: 60 } });
@@ -52,6 +83,7 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
     const ln = (color: string, extra = {}) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra });
     x.ma20 = ln(C.ma20, { lineWidth: 2 }); x.ma50 = ln(C.ma50);
     x.bbU = ln(C.bb, { lineStyle: LineStyle.Dashed }); x.bbL = ln(C.bb, { lineStyle: LineStyle.Dashed });
+    x.emaF = ln('#00BCD4', { lineWidth: 2 }); x.emaS = ln('#FF9800', { lineWidth: 2 });
     x.rsi = c2.addLineSeries({ color: C.rsi, lineWidth: 1, priceLineVisible: false });
     x.rsi.createPriceLine({ price: 70, color: C.down, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
     x.rsi.createPriceLine({ price: 30, color: C.up, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
@@ -64,17 +96,32 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
     });
     sync(c, c2); sync(c2, c);
     x.chart = c; x.chart2 = c2;
-    return () => { c.remove(); c2.remove(); };
+    // Vẽ lại lớp SMC khi cuộn/zoom/đổi kích thước/kéo thang giá
+    let raf = 0;
+    const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => redrawRef.current()); };
+    c.timeScale().subscribeVisibleLogicalRangeChange(schedule);
+    c.timeScale().subscribeSizeChange(schedule);
+    const box = el.current!;
+    ['pointermove', 'wheel', 'pointerup', 'dblclick'].forEach((ev) => box.addEventListener(ev, schedule, { passive: true }));
+    const ro = new ResizeObserver(schedule); ro.observe(box);
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); c.remove(); c2.remove(); };
   }, []);
 
   /** Tính lại toàn bộ chỉ báo từ mảng nến và vẽ lại */
   const render = useCallback((fit = false) => {
     const b = bars.current, x = s.current;
     if (!x.candle) return;
-    const { ov, osc } = opts.current;
+    const { ov, osc, smcS, ema, bt } = opts.current;
     const closes = b.map((v) => v.close);
+    // Smart Money Concepts (LuxAlgo)
+    const smc = smcS.enabled && b.length > 10 ? computeSMC(b, { swingsLength: smcS.swingLength, internalConfluence: smcS.confluence }) : null;
+    // EMA cross + backtest
+    const btr = ema.enabled && b.length > 3 ? backtestEmaCross(b, bt) : null;
     const m20 = sma(closes, 20), m50 = sma(closes, 50), bb = bollinger(closes, 20, 2), r = rsi(closes, 14), md = macd(closes);
-    x.candle.setData(b.map((v) => ({ ...v, time: T(v.time) })));
+    const tc = smc && smcS.colorCandles ? (i: number) => (smc.internalTrendByBar[i] === 1 ? '#089981' : '#F23645') : null;
+    x.candle.setData(b.map((v, i) => (tc ? { ...v, time: T(v.time), color: tc(i), wickColor: tc(i), borderColor: tc(i) } : { ...v, time: T(v.time) })));
+    x.emaF.setData(btr ? line(b, btr.emaFast) : []);
+    x.emaS.setData(btr ? line(b, btr.emaSlow) : []);
     x.vol.setData(b.map((v) => ({ time: T(v.time), value: v.volume, color: v.close >= v.open ? C.up + '55' : C.down + '55' })));
     x.ma20.setData(ov.ma20 ? line(b, m20) : []);
     x.ma50.setData(ov.ma50 ? line(b, m50) : []);
@@ -91,13 +138,25 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
         else if (crossDown(closes, m20, i)) marks.push({ time: T(b[i].time), position: 'aboveBar', color: C.down, shape: 'arrowDown', text: 'BÁN' });
       }
     }
+    if (btr) {
+      for (const sg of btr.signals) {
+        marks.push(sg.side === 'BUY'
+          ? { time: T(sg.time), position: 'belowBar', color: '#1B8112', shape: 'arrowUp', text: 'BUY' }
+          : { time: T(sg.time), position: 'aboveBar', color: '#FF5733', shape: 'arrowDown', text: 'SELL' });
+      }
+    }
+    marks.sort((p, q) => (p.time as number) - (q.time as number));
     x.candle.setMarkers(marks);
+    drawState.current = { smc, idx: new Map(b.map((v, i) => [v.time, i])), fill: btr ? { fast: btr.emaFast, slow: btr.emaSlow } : null };
+    setBtRes(btr);
+    requestAnimationFrame(() => redrawRef.current());
     const n = b.length - 1;
     setLegend({ ma20: m20[n], ma50: m50[n], rsi: r[n], macd: md.hist[n] });
     if (fit) { x.chart.timeScale().fitContent(); }
   }, []);
 
-  useEffect(() => { render(); }, [ov, osc, render]);
+  redrawRef.current = redraw;
+  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, render]);
 
   useEffect(() => {
     let dead = false;
@@ -111,7 +170,11 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
         bars.current = rows; lastTot.current = 0;
         render(true);
         // hiển thị khoảng ~120 nến gần nhất cho dễ nhìn
-        if (rows.length > 120) s.current.chart.timeScale().setVisibleLogicalRange({ from: rows.length - 120, to: rows.length + 3 });
+        if (rows.length > 120) {
+          const r = { from: rows.length - 120, to: rows.length + 5 };
+          s.current.chart.timeScale().setVisibleLogicalRange(r);
+          requestAnimationFrame(() => s.current.chart.timeScale().setVisibleLogicalRange(r)); // sau khi biểu đồ phụ đồng bộ
+        }
       })
       .catch((e) => !dead && setErr(String(e)));
     return () => { dead = true; };
@@ -161,7 +224,10 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
           <b className="d-sym">{sym}</b> <span className="muted">{st?.ex}</span>
           {st && <span className={`d-price ${pc(st.last)}`}>{fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
         </div>
-        <button className="close" onClick={onClose}>✕</button>
+        <div>
+          <button className="close" title={wide ? 'Thu nhỏ' : 'Phóng to'} onClick={onWide}>{wide ? '⇥' : '⇤'}</button>
+          <button className="close" onClick={onClose}>✕</button>
+        </div>
       </div>
       <div className="res-tabs">
         {RES.map(([k, label]) => <button key={k} className={res === k ? 'on' : ''} onClick={() => setRes(k)}>{label}</button>)}
@@ -171,13 +237,35 @@ export function StockDetail({ sym, onClose }: { sym: string; onClose: () => void
         <button className={ov.ma50 ? 'on' : ''} onClick={() => setOv({ ...ov, ma50: !ov.ma50 })}><i style={{ background: C.ma50 }} />MA50 {f2(legend.ma50)}</button>
         <button className={ov.bb ? 'on' : ''} onClick={() => setOv({ ...ov, bb: !ov.bb })}><i style={{ background: C.bb }} />Bollinger</button>
         <button className={ov.signals ? 'on' : ''} onClick={() => setOv({ ...ov, signals: !ov.signals })}>▲ Tín hiệu MA20</button>
+        <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>
+        <button className="gear" onClick={() => setSmcOpen((v) => !v)} title="Cài đặt SMC">⚙</button>
+        <button className={ema.enabled ? 'on' : ''} onClick={() => setEma({ ...ema, enabled: !ema.enabled })}><i style={{ background: '#00BCD4' }} />EMA {bt.fast}/{bt.slow} BUY/SELL</button>
+        {ema.enabled && <button className={ema.showBt ? 'on' : ''} onClick={() => setEma({ ...ema, showBt: !ema.showBt })}>📈 Backtest</button>}
       </div>
-      <div className="chart" ref={el}>{err && <div className="err">Không tải được biểu đồ: {err}</div>}</div>
+      {smcOpen && (
+        <div className="smc-panel">
+          <div className="smc-grid">
+            <label>Chế độ <select value={smcS.mode} onChange={(e) => setSmcS({ ...smcS, mode: e.target.value as SmcSettings['mode'] })}><option value="Historical">Historical</option><option value="Present">Present</option></select></label>
+            <label>Độ dài swing <input type="number" min={10} max={200} value={smcS.swingLength} onChange={(e) => setSmcS({ ...smcS, swingLength: Math.max(10, +e.target.value) })} /></label>
+            {SMC_OPTS.map(([k, label]) => (
+              <label key={k}><input type="checkbox" checked={!!smcS[k]} onChange={(e) => setSmcS({ ...smcS, [k]: e.target.checked, enabled: true })} /> {label}</label>
+            ))}
+            <label>Số OB nội bộ <input type="number" min={1} max={20} value={smcS.internalOBCount} onChange={(e) => setSmcS({ ...smcS, internalOBCount: +e.target.value })} /></label>
+            <label>Số OB swing <input type="number" min={1} max={20} value={smcS.swingOBCount} onChange={(e) => setSmcS({ ...smcS, swingOBCount: +e.target.value })} /></label>
+          </div>
+          <div className="muted note">Smart Money Concepts © LuxAlgo — giấy phép CC BY-NC-SA 4.0 (chỉ dùng phi thương mại).</div>
+        </div>
+      )}
+      <div className="chart" ref={el}>
+        <canvas ref={overlay} className="overlay" />
+        {err && <div className="err">Không tải được biểu đồ: {err}</div>}
+      </div>
       <div className="res-tabs ind">
         <button className={osc === 'RSI' ? 'on' : ''} onClick={() => setOsc('RSI')}>RSI(14) {f2(legend.rsi)}</button>
         <button className={osc === 'MACD' ? 'on' : ''} onClick={() => setOsc('MACD')}>MACD(12,26,9) {f2(legend.macd)}</button>
       </div>
       <div className="chart osc" ref={el2} />
+      {ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
       <div className="quick">
         <button onClick={() => quickAlert('MA20_CROSS_UP')}>🔔 Báo khi cắt lên MA20</button>
         {st?.last ? <button onClick={() => quickAlert('PRICE_GTE', +(st.last * 1.03).toFixed(2))}>🔔 Giá ≥ {(st.last * 1.03).toFixed(2)} (+3%)</button> : null}

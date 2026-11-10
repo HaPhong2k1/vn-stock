@@ -29,7 +29,8 @@ export interface Metrics {
   rsi14: number | null; macd: number | null; macdSig: number | null; macdHist: number | null;
   bbUp: number | null; bbLow: number | null; avgVol20: number; volRatio: number | null;
   hi52: number | null; lo52: number | null; distMa20: number | null; live: boolean;
-  aboveMa20: boolean; ma20CrossUp: boolean; ma20CrossDown: boolean; macdCrossUp: boolean; ema9CrossUp: boolean; goldenCross: boolean;
+  aboveMa20: boolean; ema10: number | null; ema20: number | null; emaCrossUp: boolean; emaCrossDown: boolean;
+  smcBullChoch: boolean; smcBearChoch: boolean; smcBullBos: boolean; smcBearBos: boolean; smcSwingTrend: number; smcInternalTrend: number; ma20CrossUp: boolean; ma20CrossDown: boolean; macdCrossUp: boolean; ema9CrossUp: boolean; goldenCross: boolean;
 }
 export interface Alert {
   id: string; sym: string; type: string; value: number | null; repeat: boolean; note: string; telegramChatId: string;
@@ -42,6 +43,11 @@ export const ALERT_LABELS: Record<string, { label: string; kind: 'level' | 'even
   MA20_CROSS_UP: { label: 'Giá cắt lên MA20 (tín hiệu MUA)', kind: 'event' },
   MA20_CROSS_DOWN: { label: 'Giá cắt xuống MA20', kind: 'event' },
   MACD_CROSS_UP: { label: 'MACD cắt lên Signal', kind: 'event' },
+  EMA_CROSS_UP: { label: 'EMA10 cắt lên EMA20 (BUY)', kind: 'event' },
+  EMA_CROSS_DOWN: { label: 'EMA10 cắt xuống EMA20 (SELL)', kind: 'event' },
+  SMC_BULL_CHOCH: { label: 'SMC: CHoCH tăng', kind: 'event' },
+  SMC_BEAR_CHOCH: { label: 'SMC: CHoCH giảm', kind: 'event' },
+  SMC_BULL_BOS: { label: 'SMC: BOS tăng', kind: 'event' },
   PRICE_GTE: { label: 'Giá ≥', kind: 'level', unit: 'nghìn đ' },
   PRICE_LTE: { label: 'Giá ≤', kind: 'level', unit: 'nghìn đ' },
   PCT_GTE: { label: '% thay đổi ≥', kind: 'level', unit: '%' },
@@ -53,4 +59,6 @@ export const ALERT_LABELS: Record<string, { label: string; kind: 'level' | 'even
 };
 export const SIGNAL_LABELS: Record<string, string> = {
   MA20_CROSS_UP: 'Cắt lên MA20 — MUA', MA20_CROSS_DOWN: 'Cắt xuống MA20', MACD_CROSS_UP: 'MACD cắt lên',
+  EMA_CROSS_UP: 'EMA10↑EMA20 — BUY', EMA_CROSS_DOWN: 'EMA10↓EMA20 — SELL',
+  SMC_BULL_CHOCH: 'SMC CHoCH tăng', SMC_BEAR_CHOCH: 'SMC CHoCH giảm', SMC_BULL_BOS: 'SMC BOS tăng',
 };

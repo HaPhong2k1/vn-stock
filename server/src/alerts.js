@@ -41,7 +41,7 @@ export class AlertEngine {
   async init() {
     this.alerts = await this.storage.loadAlerts();
     this.history = await this.storage.loadHistory();
-    this.log.info(`[alert] nạp ${this.alerts.length} cảnh báo`);
+    this.log.info(`[alert] đã nạp ${this.alerts.length} cảnh báo đã lưu (0 = chưa có cảnh báo nào, không phải lỗi)`);
   }
 
   /**

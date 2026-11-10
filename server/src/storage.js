@@ -12,6 +12,7 @@ export async function createStorage(log = console) {
   const s = url ? new PgStorage(url, log) : new FileStorage(log);
   await s.init();
   log.info(`[storage] dùng ${s.kind}`);
+  if (!url && process.env.RENDER) log.warn('[storage] CHƯA có DATABASE_URL: cảnh báo đang lưu tạm, sẽ MẤT khi server khởi động lại/deploy. Thêm DATABASE_URL (Postgres, VD Neon) trong Render > Environment.');
   return s;
 }
 

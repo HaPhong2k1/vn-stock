@@ -110,13 +110,20 @@ export class VpsProvider {
     for (const [ex, list] of [['HOSE', hose], ['HNX', hnx], ['UPCOM', upcom]]) {
       for (const s of list) this.store.patchStock(s, { ex }, { source: 'snapshot' });
     }
+    // Danh bạ mã: tên công ty + loại (S=cổ phiếu, E=ETF...) cho hộp tìm kiếm
+    try {
+      this.allList = await getJSON(`${r}/getlistallstock`);
+      const meta = new Map();
+      for (const x of this.allList || []) if (this.store.stocks.has(x.stock_code)) meta.set(x.stock_code, { name: x.name_vn, type: x.type });
+      this.store.meta = meta;
+    } catch (e) { this.log.warn('[vps] danh bạ mã lỗi', e.message); }
     await this.loadDerivatives().catch((e) => this.log.warn('[vps] phái sinh lỗi', e.message));
   }
 
   /** Xác định VN30F1M/F2M/F1Q/F2Q = các HĐ tương lai VN30 còn hiệu lực, xếp theo ngày đáo hạn */
   async loadDerivatives() {
     const r = config.vps.rest;
-    const all = await getJSON(`${r}/getlistallstock`);
+    const all = this.allList?.length ? this.allList : await getJSON(`${r}/getlistallstock`);
     const codes = (all || []).filter((x) => x.type === 'D' && /^41I1/.test(x.stock_code)).map((x) => x.stock_code);
     if (!codes.length) return;
     const rows = await getJSON(`${r}/getpsalldatalsnapshot/${codes.join(',')}`);
@@ -133,6 +140,8 @@ export class VpsProvider {
       // chuyển kỳ hạn (rollover): HĐ khác => tạo lại dòng để không lẫn dữ liệu HĐ cũ
       if ([...prev.entries()].some(([code, a]) => a === alias && code !== c.x.sym)) this.store.stocks.delete(alias);
       this.store.patchStock(alias, { ...normalizeVps(c.x, 1), ex: 'PS', code: c.x.sym, mat: c.mat }, { source: 'snapshot' });
+      const term = { VN30F1M: 'tháng gần nhất', VN30F2M: 'tháng kế tiếp', VN30F1Q: 'quý gần nhất', VN30F2Q: 'quý kế tiếp' }[alias];
+      (this.store.meta ??= new Map()).set(alias, { name: `HĐ tương lai VN30 ${term} (${c.x.sym}, đáo hạn ${c.mat.split('-').reverse().join('/')})`, type: 'F' });
     }
     if (this.socket?.connected && this.derivCodes.length) this.socket.emit('regs', JSON.stringify({ action: 'join', list: this.derivCodes.join(',') }));
     this.log.info(`[vps] phái sinh: ${[...next].map(([c, a]) => `${a}=${c}`).join(', ')}`);
@@ -228,8 +237,11 @@ export class VpsProvider {
     // Đối soát định kỳ trong giờ giao dịch
     setInterval(() => { if (isTradingActive()) this.resync().catch(() => {}); }, config.resyncMs);
     setInterval(() => { if (derivActive()) this.pollDerivatives().catch(() => {}); }, 2_000);
-    // kiểm tra chuyển kỳ hạn HĐ tương lai
-    setInterval(() => this.loadDerivatives().catch(() => {}), 30 * 60_000);
+    // kiểm tra chuyển kỳ hạn HĐ tương lai (tải lại danh bạ để thấy HĐ mới niêm yết)
+    setInterval(async () => {
+      try { this.allList = await getJSON(`${config.vps.rest}/getlistallstock`); } catch { /* giữ danh bạ cũ */ }
+      this.loadDerivatives().catch(() => {});
+    }, 30 * 60_000);
     // Watchdog: socket "im lặng" bất thường => kết nối lại
     setInterval(() => {
       if (!isTradingActive()) return;

@@ -57,6 +57,19 @@ app.get('/api/stock/:sym', (req, res) => {
   const st = store.stocks.get(req.params.sym.toUpperCase());
   st ? res.json(st) : res.status(404).json({ error: 'không tìm thấy mã' });
 });
+// Danh bạ mã cho hộp tìm kiếm: cổ phiếu, ETF, HĐ tương lai, chỉ số
+const INDEX_DIR = [
+  ['VNINDEX', 'Chỉ số VN-Index', 'HOSE'], ['VN30', 'Chỉ số VN30', 'HOSE'],
+  ['HNX', 'Chỉ số HNX-Index', 'HNX'], ['HNX30', 'Chỉ số HNX30', 'HNX'], ['UPCOM', 'Chỉ số UPCoM-Index', 'UPCOM'],
+];
+const TYPE = { S: 'stock', E: 'etf', F: 'futures' };
+app.get('/api/symbols', wrap(() => [
+  ...[...store.stocks.values()].map((st) => {
+    const m = store.meta?.get(st.s);
+    return { s: st.s, name: m?.name || '', ex: st.ex, type: TYPE[m?.type] || (st.ex === 'PS' ? 'futures' : 'stock') };
+  }),
+  ...INDEX_DIR.map(([s, name, ex]) => ({ s, name, ex, type: 'index' })),
+]));
 app.get('/api/indices', (_req, res) => res.json([...store.indices.values()]));
 app.get('/api/history', async (req, res) => {
   try { res.json(await getHistory(req.query)); }

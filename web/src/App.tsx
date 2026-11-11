@@ -28,7 +28,7 @@ export default function App() {
   const [wide, setWide] = useState(false);
   const [full, setFull] = useState(false);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setFull(false); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.ss-backdrop')) setFull(false); };
     addEventListener('keydown', k); return () => removeEventListener('keydown', k);
   }, []);
   const [alertSym, setAlertSym] = useState<string | undefined>();
@@ -78,7 +78,7 @@ export default function App() {
         {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={setPick} onToggleWatch={toggleWatch} />}
         {view === 'screener' && <Screener watch={watchSet} onPick={setPick} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
         {view === 'alerts' && <Alerts initialSym={alertSym} onPick={setPick} />}
-        {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} />}
+        {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} onPick={setPick} />}
       </main>
       <StatusBar />
       <Toasts />

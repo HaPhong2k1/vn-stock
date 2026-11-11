@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, type IChartApi, type ISeriesApi, type SeriesMarker, type UTCTimestamp, LineStyle } from 'lightweight-charts';
 import { sma, rsi, macd, bollinger, crossUp, crossDown } from '../../../shared/indicators.js';
 import { useStock } from '../lib/hooks';
@@ -8,6 +8,8 @@ import { computeSMC } from '../../../shared/smc.js';
 import { backtestEmaCross, BT_DEFAULTS, type BtOptions, type BtResult } from '../../../shared/strategy.js';
 import { drawOverlay, SMC_UI_DEFAULTS, type SmcSettings } from '../lib/smcDraw';
 import { Backtest } from './Backtest';
+import { SymbolSearch } from './SymbolSearch';
+import { useGlobal } from '../lib/hooks';
 
 const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const saveLS = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bỏ qua */ } };
@@ -30,8 +32,33 @@ const T = (t: number) => (t + VN) as UTCTimestamp;
 const line = (bars: Bar[], vals: (number | null)[]) =>
   bars.map((b, i) => (vals[i] === null ? { time: T(b.time) } : { time: T(b.time), value: vals[i] as number }));
 
-export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void; full: boolean; onFull: () => void }) {
-  const st = useStock(sym);
+const INDEX_CODE: Record<string, string> = { VNINDEX: '10', VN30: '11', HNX: '02', HNX30: '12', UPCOM: '03' };
+
+export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void; full: boolean; onFull: () => void; onPick: (s: string) => void }) {
+  const stock = useStock(sym);
+  const g = useGlobal();
+  // Chỉ số (VNINDEX, VN30...): dựng dữ liệu "giả cổ phiếu" từ chỉ số realtime để header & nến cuối vẫn cập nhật
+  const ixCode = INDEX_CODE[sym];
+  const ix = ixCode ? g.indices.get(ixCode) : undefined;
+  const ixLast = ix?.value, ixChg = ix?.chg, ixPc = ix?.chgPc;
+  const st = useMemo(() => stock || (ixLast ? {
+    s: sym, ex: 'INDEX', ref: ixLast - (ixChg || 0), ceil: Infinity, floor: 0, open: 0, last: ixLast, lastVol: 0, chg: ixChg || 0, chgPc: ixPc || 0,
+    high: 0, low: 0, avg: 0, totVol: 0, b: [], a: [], fB: 0, fS: 0, room: 0, t: '', seq: 0, u: 0,
+  } as any : undefined), [stock, sym, ixLast, ixChg, ixPc]);
+  const isIndex = !!ixCode;
+  const [search, setSearch] = useState<string | null>(null);
+  // Gõ chữ/số khi đang xem biểu đồ => mở hộp tìm kiếm (giống TradingView/Fiant); Ctrl+K cũng mở
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (search !== null) return;
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearch(''); return; }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && /^[a-zA-Z0-9]$/.test(e.key)) { e.preventDefault(); setSearch(e.key.toUpperCase()); }
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, [search]);
   const [res, setRes] = useState<string>('1D');
   const [ov, setOv] = useState({ ma20: true, ma50: true, bb: false, signals: true });
   const [osc, setOsc] = useState<'RSI' | 'MACD'>('RSI');
@@ -195,18 +222,18 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
         bar = { time: Date.parse(today + 'T02:00:00Z') / 1000, open: st.open || st.last, high: st.last, low: st.last, close: st.last, volume: 0 };
         append = true;
       }
-      bar = { ...bar, close: st.last, high: Math.max(bar.high, st.high || st.last), low: Math.min(bar.low, st.low || st.last), volume: res === '1D' ? st.totVol : bar.volume };
+      bar = { ...bar, close: st.last, high: Math.max(bar.high, st.high || st.last), low: Math.min(bar.low, st.low || st.last), volume: res === '1D' && !isIndex ? st.totVol : bar.volume };
     } else {
       const step = STEP[res];
       const bucket = Math.floor(now / step) * step;
-      const delta = lastTot.current ? Math.max(0, st.totVol - lastTot.current) : 0;
+      const delta = lastTot.current && !isIndex ? Math.max(0, st.totVol - lastTot.current) : 0;
       if (bucket > bar.time) { bar = { time: bucket, open: st.last, high: st.last, low: st.last, close: st.last, volume: delta }; append = true; }
       else bar = { ...bar, close: st.last, high: Math.max(bar.high, st.last), low: Math.min(bar.low, st.last), volume: bar.volume + delta };
     }
     lastTot.current = st.totVol;
     if (append) b.push(bar); else b[b.length - 1] = bar;
     if (!pending.current) { pending.current = true; setTimeout(() => { pending.current = false; render(); }, 300); }
-  }, [st, res, render]);
+  }, [st, res, render, isIndex]);
 
   const quickAlert = async (type: string, value?: number) => {
     try {
@@ -221,8 +248,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
     <div className={`detail${full ? ' full' : ''}`}>
       <div className="detail-head">
         <div>
-          <b className="d-sym">{sym}</b> <span className="muted">{st?.ex === 'PS' ? `Phái sinh · HĐ ${st.code} · đáo hạn ${st.mat?.split('-').reverse().join('/')}` : st?.ex}</span>
-          {st && <span className={`d-price ${pc(st.last)}`}>{fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
+          <button className="sym-btn" onClick={() => setSearch('')} title="Tìm mã khác (hoặc gõ chữ bất kỳ)">🔍 <b className="d-sym">{sym}</b></button> <span className="muted">{st?.ex === 'PS' ? `Phái sinh · HĐ ${st.code} · đáo hạn ${st.mat?.split('-').reverse().join('/')}` : isIndex ? 'Chỉ số' : st?.ex}</span>
+          {st && <span className={`d-price ${pc(st.last)}`}>{isIndex ? st.last.toFixed(2) : fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
         </div>
         <div>
           <button className="expand" title={full ? 'Thoát toàn màn hình (Esc)' : 'Mở rộng biểu đồ toàn màn hình'} onClick={onFull}>{full ? '🗗 Thu nhỏ' : '⛶ Toàn màn hình'}</button>
@@ -267,13 +294,13 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
       </div>
       <div className="chart osc" ref={el2} />
       {!full && ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
-      {!full && <div className="quick">
+      {!full && !isIndex && <div className="quick">
         <button onClick={() => quickAlert('MA20_CROSS_UP')}>🔔 Báo khi cắt lên MA20</button>
         {st?.last ? <button onClick={() => quickAlert('PRICE_GTE', +(st.last * 1.03).toFixed(2))}>🔔 Giá ≥ {(st.last * 1.03).toFixed(2)} (+3%)</button> : null}
         {st?.last ? <button onClick={() => quickAlert('PRICE_LTE', +(st.last * 0.97).toFixed(2))}>🔔 Giá ≤ {(st.last * 0.97).toFixed(2)} (−3%)</button> : null}
         <span className="muted">{msg}</span>
       </div>}
-      {st && !full && (
+      {st && !full && !isIndex && (
         <div className="detail-grid">
           <table className="book">
             <thead><tr><th>KL mua</th><th>Giá mua</th><th>Giá bán</th><th>KL bán</th></tr></thead>
@@ -301,6 +328,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
           </dl>
         </div>
       )}
+      {search !== null && <SymbolSearch initial={search} onClose={() => setSearch(null)} onSelect={(x) => { setSearch(null); if (x !== sym) onPick(x); }} />}
     </div>
   );
 }

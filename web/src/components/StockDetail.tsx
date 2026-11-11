@@ -241,7 +241,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
         <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>
         <button className="gear" onClick={() => setSmcOpen((v) => !v)} title="Cài đặt SMC">⚙</button>
         <button className={ema.enabled ? 'on' : ''} onClick={() => setEma({ ...ema, enabled: !ema.enabled })}><i style={{ background: '#00BCD4' }} />EMA {bt.fast}/{bt.slow} BUY/SELL</button>
-        {ema.enabled && <button className={ema.showBt ? 'on' : ''} onClick={() => setEma({ ...ema, showBt: !ema.showBt })}>📈 Backtest</button>}
+        {ema.enabled && !full && <button className={ema.showBt ? 'on' : ''} onClick={() => setEma({ ...ema, showBt: !ema.showBt })}>📈 Backtest</button>}
       </div>
       {smcOpen && (
         <div className="smc-panel">
@@ -266,14 +266,14 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull }: { sym:
         <button className={osc === 'MACD' ? 'on' : ''} onClick={() => setOsc('MACD')}>MACD(12,26,9) {f2(legend.macd)}</button>
       </div>
       <div className="chart osc" ref={el2} />
-      {ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
-      <div className="quick">
+      {!full && ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
+      {!full && <div className="quick">
         <button onClick={() => quickAlert('MA20_CROSS_UP')}>🔔 Báo khi cắt lên MA20</button>
         {st?.last ? <button onClick={() => quickAlert('PRICE_GTE', +(st.last * 1.03).toFixed(2))}>🔔 Giá ≥ {(st.last * 1.03).toFixed(2)} (+3%)</button> : null}
         {st?.last ? <button onClick={() => quickAlert('PRICE_LTE', +(st.last * 0.97).toFixed(2))}>🔔 Giá ≤ {(st.last * 0.97).toFixed(2)} (−3%)</button> : null}
         <span className="muted">{msg}</span>
-      </div>
-      {st && (
+      </div>}
+      {st && !full && (
         <div className="detail-grid">
           <table className="book">
             <thead><tr><th>KL mua</th><th>Giá mua</th><th>Giá bán</th><th>KL bán</th></tr></thead>

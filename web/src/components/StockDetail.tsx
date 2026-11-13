@@ -26,6 +26,16 @@ const SPAN: Record<string, number> = { '1': 5, '5': 15, '15': 40, '1H': 120, '1D
 const STEP: Record<string, number> = { '1': 60, '5': 300, '15': 900, '1H': 3600 };
 const C = { up: '#0ecb81', down: '#f6465d', ma20: '#f0a020', ma50: '#3b82f6', bb: '#8b95a5', rsi: '#a855f7', macd: '#3b82f6', sig: '#f0a020' };
 
+// Các đường MA (SMA giá đóng cửa) bật/tắt được
+const MAS = [
+  { k: 'ma6', n: 6, color: '#e91e63', w: 1 },
+  { k: 'ma10', n: 10, color: '#00bcd4', w: 1 },
+  { k: 'ma20', n: 20, color: '#f0a020', w: 2 },
+  { k: 'ma50', n: 50, color: '#3b82f6', w: 1 },
+  { k: 'ma200', n: 200, color: '#9c27b0', w: 2 },
+] as const;
+type MaKey = typeof MAS[number]['k'];
+
 type Bar = { time: number; open: number; high: number; low: number; close: number; volume: number };
 const T = (t: number) => (t + VN) as UTCTimestamp;
 // Điểm chưa đủ dữ liệu => "whitespace" để 2 biểu đồ có cùng trục thời gian (đồng bộ cuộn/zoom)
@@ -60,11 +70,12 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     return () => removeEventListener('keydown', k);
   }, [search]);
   const [res, setRes] = useState<string>('1D');
-  const [ov, setOv] = useState({ ma20: true, ma50: true, bb: false, signals: true });
+  const [ov, setOv] = useState(() => load('chartOv', { ma6: false, ma10: false, ma20: true, ma50: true, ma200: false, bb: false, signals: true }));
+  useEffect(() => saveLS('chartOv', ov), [ov]);
   const [osc, setOsc] = useState<'RSI' | 'MACD'>('RSI');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
-  const [legend, setLegend] = useState<{ ma20?: number | null; ma50?: number | null; rsi?: number | null; macd?: number | null }>({});
+  const [legend, setLegend] = useState<Partial<Record<MaKey | 'rsi' | 'macd', number | null>>>({});
   const el = useRef<HTMLDivElement>(null);
   const redrawRef = useRef<() => void>(() => {});
   const el2 = useRef<HTMLDivElement>(null);
@@ -108,7 +119,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     x.vol = c.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'v', lastValueVisible: false, priceLineVisible: false });
     c.priceScale('v').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     const ln = (color: string, extra = {}) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra });
-    x.ma20 = ln(C.ma20, { lineWidth: 2 }); x.ma50 = ln(C.ma50);
+    for (const m of MAS) x[m.k] = ln(m.color, { lineWidth: m.w });
     x.bbU = ln(C.bb, { lineStyle: LineStyle.Dashed }); x.bbL = ln(C.bb, { lineStyle: LineStyle.Dashed });
     x.emaF = ln('#00BCD4', { lineWidth: 2 }); x.emaS = ln('#FF9800', { lineWidth: 2 });
     x.rsi = c2.addLineSeries({ color: C.rsi, lineWidth: 1, priceLineVisible: false });
@@ -144,14 +155,14 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     const smc = smcS.enabled && b.length > 10 ? computeSMC(b, { swingsLength: smcS.swingLength, internalConfluence: smcS.confluence }) : null;
     // EMA cross + backtest
     const btr = ema.enabled && b.length > 3 ? backtestEmaCross(b, bt) : null;
-    const m20 = sma(closes, 20), m50 = sma(closes, 50), bb = bollinger(closes, 20, 2), r = rsi(closes, 14), md = macd(closes);
+    const maVals = Object.fromEntries(MAS.map((m) => [m.k, sma(closes, m.n)])) as Record<MaKey, (number | null)[]>;
+    const m20 = maVals.ma20, bb = bollinger(closes, 20, 2), r = rsi(closes, 14), md = macd(closes);
     const tc = smc && smcS.colorCandles ? (i: number) => (smc.internalTrendByBar[i] === 1 ? '#089981' : '#F23645') : null;
     x.candle.setData(b.map((v, i) => (tc ? { ...v, time: T(v.time), color: tc(i), wickColor: tc(i), borderColor: tc(i) } : { ...v, time: T(v.time) })));
     x.emaF.setData(btr ? line(b, btr.emaFast) : []);
     x.emaS.setData(btr ? line(b, btr.emaSlow) : []);
     x.vol.setData(b.map((v) => ({ time: T(v.time), value: v.volume, color: v.close >= v.open ? C.up + '55' : C.down + '55' })));
-    x.ma20.setData(ov.ma20 ? line(b, m20) : []);
-    x.ma50.setData(ov.ma50 ? line(b, m50) : []);
+    for (const m of MAS) x[m.k].setData(ov[m.k] ? line(b, maVals[m.k]) : []);
     x.bbU.setData(ov.bb ? line(b, bb.upper) : []); x.bbL.setData(ov.bb ? line(b, bb.lower) : []);
     x.rsi.setData(osc === 'RSI' ? line(b, r) : []);
     x.macdL.setData(osc === 'MACD' ? line(b, md.line) : []);
@@ -178,7 +189,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     setBtRes(btr);
     requestAnimationFrame(() => redrawRef.current());
     const n = b.length - 1;
-    setLegend({ ma20: m20[n], ma50: m50[n], rsi: r[n], macd: md.hist[n] });
+    setLegend({ ...Object.fromEntries(MAS.map((m) => [m.k, maVals[m.k][n]])), rsi: r[n], macd: md.hist[n] });
     if (fit) { x.chart.timeScale().fitContent(); }
   }, []);
 
@@ -261,8 +272,12 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         {RES.map(([k, label]) => <button key={k} className={res === k ? 'on' : ''} onClick={() => setRes(k)}>{label}</button>)}
       </div>
       <div className="res-tabs ind">
-        <button className={ov.ma20 ? 'on' : ''} onClick={() => setOv({ ...ov, ma20: !ov.ma20 })}><i style={{ background: C.ma20 }} />MA20 {f2(legend.ma20)}</button>
-        <button className={ov.ma50 ? 'on' : ''} onClick={() => setOv({ ...ov, ma50: !ov.ma50 })}><i style={{ background: C.ma50 }} />MA50 {f2(legend.ma50)}</button>
+        {MAS.map((m) => (
+          <button key={m.k} className={ov[m.k] ? 'on' : ''} onClick={() => setOv({ ...ov, [m.k]: !ov[m.k] })}
+            title={legend[m.k] === null ? `Chưa đủ ${m.n} nến ở khung này` : `Trung bình ${m.n} phiên`}>
+            <i style={{ background: m.color }} />MA{m.n} {ov[m.k] ? f2(legend[m.k]) : ''}
+          </button>
+        ))}
         <button className={ov.bb ? 'on' : ''} onClick={() => setOv({ ...ov, bb: !ov.bb })}><i style={{ background: C.bb }} />Bollinger</button>
         <button className={ov.signals ? 'on' : ''} onClick={() => setOv({ ...ov, signals: !ov.signals })}>▲ Tín hiệu MA20</button>
         <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>

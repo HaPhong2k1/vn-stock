@@ -19,6 +19,7 @@ export const ALERT_TYPES = {
   MA20_CROSS_UP: { label: 'Giá cắt lên MA20 (tín hiệu MUA)', kind: 'event', test: (st, m) => !!m?.live && !!m?.aboveMa20 },
   MA20_CROSS_DOWN: { label: 'Giá cắt xuống MA20', kind: 'event', test: (st, m) => !!m?.live && m?.aboveMa20 === false && m?.ma20 !== null },
   MACD_CROSS_UP: { label: 'MACD cắt lên Signal', kind: 'event', test: (st, m) => !!m?.live && m?.macdHist > 0 },
+  WMA200_CROSS_UP: { label: 'Giá cắt lên MA200 khung tuần', kind: 'event', test: (st, m) => !!m?.live && !!m?.aboveWMa200 },
   EMA_CROSS_UP: { label: 'EMA10 cắt lên EMA20 (BUY)', kind: 'event', test: (st, m) => !!m?.live && m?.ema10 > m?.ema20 },
   EMA_CROSS_DOWN: { label: 'EMA10 cắt xuống EMA20 (SELL)', kind: 'event', test: (st, m) => !!m?.live && m?.ema10 < m?.ema20 },
   SMC_BULL_CHOCH: { label: 'SMC: CHoCH tăng', kind: 'event', test: (st, m) => !!m?.live && !!m?.smcBullChoch },

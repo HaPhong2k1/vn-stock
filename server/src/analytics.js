@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { sma, ema, rsi, macd, bollinger } from '../../shared/indicators.js';
 import { computeSMC, smcLastBarSignals } from '../../shared/smc.js';
 import { emaTV } from '../../shared/strategy.js';
-import { todayStarted, vnDate } from './daily.js';
+import { todayStarted, vnDate, weekStarted } from './daily.js';
 import { isTradingActive } from './market-hours.js';
 
 const SIGNAL_DEDUPE_MS = Number(process.env.SIGNAL_DEDUPE_MS || 15 * 60_000);
@@ -46,6 +46,14 @@ export class Analytics extends EventEmitter {
     if (live) bars.push({ time: Math.floor(Date.now() / 1000), open: st.open || st.last, high: st.high || st.last, low: st.low || st.last, close: st.last });
     const smc = smcLastBarSignals(computeSMC(bars));
     const ef = emaTV(closes, 10), es = emaTV(closes, 20);
+    // --- Khung TUẦN: MA200 tuần = 199 tuần đã đóng + giá hiện tại (tuần đang chạy)
+    const wc = h.w?.c || [];
+    const wLive = weekStarted() && wc.length > 0;
+    const wPrice = st.last || h.c[h.c.length - 1];
+    const wCloses = wLive ? [...wc, wPrice] : wc;
+    const wn = wCloses.length - 1;
+    const wma200 = sma(wCloses, 200);
+    const wMa = wn >= 0 ? wma200[wn] : null, wMaPrev = wn > 0 ? wma200[wn - 1] : null;
     const n = closes.length - 1;
     const ma20 = sma(closes, 20), ma50 = sma(closes, 50), ma200 = sma(closes, 200);
     const e9 = ema(closes, 9), e21 = ema(closes, 21);
@@ -76,6 +84,10 @@ export class Analytics extends EventEmitter {
       macdCrossUp: md.hist[n] !== null && md.hist[n - 1] !== null && md.hist[n - 1] <= 0 && md.hist[n] > 0,
       ema9CrossUp: e9[n] !== null && e9[n - 1] !== null && e9[n - 1] <= e21[n - 1] && e9[n] > e21[n],
       ema10: r2(ef[n]), ema20: r2(es[n]),
+      wMa200: r2(wMa), weeks: wc.length,
+      distWMa200: wMa ? r2(((wCloses[wn] - wMa) / wMa) * 100) : null,
+      aboveWMa200: wMa !== null && wCloses[wn] > wMa,
+      wMa200CrossUp: wLive && wMa !== null && wMaPrev !== null && wCloses[wn - 1] <= wMaPrev && wCloses[wn] > wMa,
       emaCrossUp: n > 0 && ef[n] > es[n] && ef[n - 1] <= es[n - 1],
       emaCrossDown: n > 0 && ef[n] < es[n] && ef[n - 1] >= es[n - 1],
       ...smc,
@@ -91,6 +103,7 @@ export class Analytics extends EventEmitter {
       if (prev.aboveMa20 && !m.aboveMa20) this.pushSignal('MA20_CROSS_DOWN', m);
       if (!prev.macdCrossUp && m.macdCrossUp) this.pushSignal('MACD_CROSS_UP', m);
       if (!prev.emaCrossUp && m.emaCrossUp) this.pushSignal('EMA_CROSS_UP', m);
+      if (!prev.aboveWMa200 && m.aboveWMa200) this.pushSignal('WMA200_CROSS_UP', m);
       if (!prev.emaCrossDown && m.emaCrossDown) this.pushSignal('EMA_CROSS_DOWN', m);
       if (!prev.smcBullChoch && m.smcBullChoch) this.pushSignal('SMC_BULL_CHOCH', m);
       if (!prev.smcBearChoch && m.smcBearChoch) this.pushSignal('SMC_BEAR_CHOCH', m);

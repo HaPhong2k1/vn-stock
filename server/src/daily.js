@@ -10,6 +10,21 @@ import { config } from './config.js';
  */
 const FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/daily.json');
 const DAYS = 420;
+const WEEK_DAYS = 6 * 365; // ~310 tuần: đủ cho MA200 tuần
+
+/** Thứ Hai (00:00 UTC, như mốc nến tuần của DNSE) của tuần hiện tại theo giờ VN */
+export function currentWeekStart(now = Date.now()) {
+  const d = new Date(now + 7 * 3600_000);
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = Thứ Hai
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow) / 1000;
+}
+
+/** Tuần hiện tại đã có phiên giao dịch chưa (sau 9:00 thứ Hai) */
+export function weekStarted(now = Date.now()) {
+  const d = new Date(now + 7 * 3600_000);
+  const dow = (d.getUTCDay() + 6) % 7;
+  return dow > 0 || d.getUTCHours() >= 9;
+}
 
 export const vnDate = (ms = Date.now()) => new Date(ms + 7 * 3600_000).toISOString().slice(0, 10);
 
@@ -40,7 +55,7 @@ export class DailyStore {
     try {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       const first = Object.values(j.bars)[0];
-      if (!first?.o) { this.log.info('[daily] cache định dạng cũ (thiếu giá mở cửa) → tải lại'); return; }
+      if (!first?.o || !first?.w) { this.log.info('[daily] cache định dạng cũ (thiếu giá mở cửa/nến tuần) → tải lại'); return; }
       this.asOf = j.asOf;
       for (const [s, b] of Object.entries(j.bars)) this.bars.set(s, b);
       this.log.info(`[daily] cache ${this.bars.size} mã, đến ngày ${this.asOf}`);
@@ -66,12 +81,25 @@ export class DailyStore {
           if (vnDate(t * 1000) >= today) return; // bỏ phiên hôm nay (chưa chốt)
           b.t.push(t); b.o.push(j.o[k]); b.c.push(j.c[k]); b.h.push(j.h[k]); b.l.push(j.l[k]); b.v.push(j.v[k]);
         });
+        b.w = await this.fetchWeekly(sym, kind);
         return b;
       } catch (e) {
         if (i === 2) throw e;
         await new Promise((res) => setTimeout(res, 1000 * (i + 1)));
       }
     }
+  }
+
+  /** Nến tuần đã kết thúc (bỏ tuần hiện tại — tuần này lấy giá realtime) */
+  async fetchWeekly(sym, kind) {
+    const to = Math.floor(Date.now() / 1000);
+    const r = await fetch(`${config.historyApi}/${kind}?symbol=${sym}&resolution=1W&from=${to - WEEK_DAYS * 86400}&to=${to}`, { signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const ws = currentWeekStart();
+    const w = { t: [], c: [] };
+    (j.t || []).forEach((t, k) => { if (t < ws) { w.t.push(t); w.c.push(j.c[k]); } });
+    return w;
   }
 
   async refresh(symbols) {

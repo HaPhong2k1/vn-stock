@@ -7,6 +7,8 @@ const PRESETS: { key: string; label: string; hint: string; test: Pred }[] = [
   { key: 'ma20up', label: '🟢 Cắt lên MA20 (MUA)', hint: 'Phiên trước đóng cửa ≤ MA20, giá hiện tại > MA20', test: (m) => m.ma20CrossUp },
   { key: 'ma20down', label: '🔴 Cắt xuống MA20', hint: 'Phiên trước ≥ MA20, giá hiện tại < MA20', test: (m) => m.ma20CrossDown },
   { key: 'above20', label: 'Trên MA20', hint: 'Giá > MA20', test: (m) => m.aboveMa20 },
+  { key: 'w200', label: '📅 Tuần: giá trên MA200', hint: 'Khung TUẦN: giá hiện tại > MA200 tuần (trung bình 200 tuần; cần mã niêm yết ≥ 200 tuần)', test: (m) => m.aboveWMa200 },
+  { key: 'w200up', label: '📅 Tuần: cắt lên MA200', hint: 'Khung TUẦN: tuần trước đóng cửa ≤ MA200 tuần, tuần này giá > MA200 tuần', test: (m) => m.wMa200CrossUp },
   { key: 'uptrend', label: 'Xu hướng tăng', hint: 'Giá > MA20 > MA50 > MA200', test: (m) => !!(m.ma20 && m.ma50 && m.ma200 && m.price > m.ma20 && m.ma20 > m.ma50 && m.ma50 > m.ma200) },
   { key: 'rsi30', label: 'RSI quá bán (<30)', hint: 'RSI(14) < 30', test: (m) => m.rsi14 !== null && m.rsi14 < 30 },
   { key: 'rsi70', label: 'RSI quá mua (>70)', hint: 'RSI(14) > 70', test: (m) => m.rsi14 !== null && m.rsi14 > 70 },
@@ -33,6 +35,8 @@ const COLS: Col[] = [
   { k: 'ma20', label: 'MA20', fmt: (m) => n2(m.ma20) },
   { k: 'distMa20', label: '% vs MA20', fmt: (m) => n2(m.distMa20), cls: (m) => pcCls(m.distMa20) },
   { k: 'ma50', label: 'MA50', fmt: (m) => n2(m.ma50) },
+  { k: 'wMa200', label: 'MA200 tuần', fmt: (m) => n2(m.wMa200) },
+  { k: 'distWMa200', label: '% vs MA200T', fmt: (m) => n2(m.distWMa200), cls: (m) => pcCls(m.distWMa200) },
   { k: 'rsi14', label: 'RSI14', fmt: (m) => n2(m.rsi14), cls: (m) => (m.rsi14 === null ? '' : m.rsi14 < 30 ? 'c-floor' : m.rsi14 > 70 ? 'c-ceil' : '') },
   { k: 'macdHist', label: 'MACD hist', fmt: (m) => n2(m.macdHist), cls: (m) => pcCls(m.macdHist) },
   { k: 'totVol', label: 'KL', fmt: (m) => fmtBig(m.totVol) },
@@ -95,7 +99,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
             {err && <span className="c-down"> · {err}</span>}
           </span>
         </div>
-        <div className="muted note">Tín hiệu tính theo nến ngày; phiên hôm nay dùng giá khớp realtime (MA20 = 19 phiên trước + giá hiện tại). Trong phiên, tín hiệu có thể xuất hiện rồi mất nếu giá quay lại dưới MA20 — chỉ xác nhận khi đóng cửa.</div>
+        <div className="muted note">Tín hiệu tính theo nến ngày (bộ lọc 📅 tính theo nến tuần: MA200 tuần = 199 tuần đã đóng + giá hiện tại; mã niêm yết chưa đủ 200 tuần sẽ không có MA200 tuần); phiên hôm nay dùng giá khớp realtime (MA20 = 19 phiên trước + giá hiện tại). Trong phiên, tín hiệu có thể xuất hiện rồi mất nếu giá quay lại dưới MA20 — chỉ xác nhận khi đóng cửa.</div>
       </div>
       <div className="table-wrap">
         <table className="grid">
@@ -115,6 +119,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
                 {COLS.map((c) => <td key={c.k} className={c.cls?.(m) || ''}>{c.fmt ? c.fmt(m) : String(m[c.k])}</td>)}
                 <td className="tags">
                   {m.ma20CrossUp && <span className="tag buy">MUA · MA20↑</span>}
+                  {m.wMa200CrossUp && <span className="tag buy">MA200 tuần↑</span>}
                   {m.ma20CrossDown && <span className="tag sell">MA20↓</span>}
                   {m.macdCrossUp && <span className="tag">MACD↑</span>}
                   {m.ema9CrossUp && <span className="tag">EMA9↑</span>}

@@ -52,9 +52,11 @@ export default function App() {
   const toggleWatch = useCallback((s: string) => setWatch((w) => (w.includes(s) ? w.filter((x) => x !== s) : [...w, s])), []);
 
   const allSyms = useMemo(() => new Set(Object.values(f.groups).flat()), [groupsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Chọn mã từ bảng giá / ô tìm kiếm / thẻ VN30F1M => mở thẳng biểu đồ toàn màn hình
+  const openFull = useCallback((s: string) => { setPick(s); setFull(true); }, []);
   const onSearchEnter = () => {
     const s = q.trim().toUpperCase();
-    if (allSyms.has(s)) { setPick(s); setQ(''); }
+    if (allSyms.has(s)) { openFull(s); setQ(''); }
   };
 
   return (
@@ -64,7 +66,7 @@ export default function App() {
         <div className="views">
           {VIEWS.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}
         </div>
-        <IndexBar onPick={setPick} />
+        <IndexBar onPick={openFull} />
       </header>
       {view === 'board' && <nav className="toolbar">
         {TABS.map((t) => (
@@ -75,7 +77,7 @@ export default function App() {
         <span className="muted count">{syms.length} mã · {tab === 'PS' ? 'Giá: điểm · KL: hợp đồng · cột Room = OI' : 'Giá: nghìn đồng · KL: cổ phiếu'}</span>
       </nav>}
       <main className={pick ? `with-detail${wide ? ' wide' : ''}` : ''}>
-        {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={setPick} onToggleWatch={toggleWatch} />}
+        {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={openFull} onToggleWatch={toggleWatch} />}
         {view === 'screener' && <Screener watch={watchSet} onPick={setPick} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
         {view === 'alerts' && <Alerts initialSym={alertSym} onPick={setPick} />}
         {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} onPick={setPick} />}

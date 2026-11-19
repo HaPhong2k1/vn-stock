@@ -28,6 +28,14 @@ npm run start:sim      # chế độ giả lập: lấy snapshot thật rồi si
 
 Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localhost:5173, proxy `/api` và `/ws`).
 
+## 👣 Footprint (Bid x Ask)
+Nút **👣 Footprint** trong khung biểu đồ: KL bán/mua chủ động theo từng mức giá, delta, POC, imbalance chéo (300%),
+stacked imbalance, unfinished auction, exhaustion, absorption, phân kỳ delta, tab **Delta & CVD**.
+- Cổ phiếu: dữ liệu từng lệnh khớp thật (VPS, có chiều chủ động) — khung phút & **Ngày**.
+- VN30F1M: khung 1/5/15 phút & **Ngày**, dữ liệu **ước lượng** từ luồng realtime (VPS không có lệnh khớp phái sinh).
+- Lịch sử khung ngày được lưu mỗi phiên sau 15:05 (`FP_TOP` mã thanh khoản cao nhất, mặc định 100) — cần `DATABASE_URL`.
+- Hướng dẫn thực chiến: [docs/FOOTPRINT.md](docs/FOOTPRINT.md). API: `GET /api/footprint?symbol=VN30F1M&tf=300` (tf: 60/300/900/1800/3600/86400).
+
 ## Phái sinh VN30F
 Tab **Phái sinh**: VN30F1M, VN30F2M, VN30F1Q, VN30F2Q (tự ánh xạ sang mã HĐ KRX, VD `41I1GB000`, và tự chuyển kỳ hạn khi đáo hạn).
 Thẻ VN30F1M trên thanh chỉ số hiển thị giá, KL, OI và basis so với VN30. Giá theo điểm, KL theo hợp đồng

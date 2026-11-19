@@ -38,6 +38,28 @@ class FileStorage {
   }
   async deleteAlert(id) { this.data.alerts = this.data.alerts.filter((x) => x.id !== id); this.flush(); }
   async insertEvent(ev) { this.data.history.unshift(ev); this.flush(); }
+
+  // ---- Footprint: kind 'D' = hồ sơ ngày, 'M' = nến phút của 1 ngày (VN30F)
+  fpFile() { return path.join(path.dirname(this.file), 'footprint.json'); }
+  fpLoad() {
+    if (!this.fp) { try { this.fp = JSON.parse(fs.readFileSync(this.fpFile(), 'utf8')); } catch { this.fp = {}; } }
+    return this.fp;
+  }
+  async fpSave(sym, kind, day, data) {
+    const fp = this.fpLoad();
+    fp[`${sym}|${kind}|${day}`] = data;
+    fs.mkdirSync(path.dirname(this.fpFile()), { recursive: true });
+    fs.writeFileSync(this.fpFile(), JSON.stringify(fp));
+  }
+  async fpGet(sym, kind, fromDay) {
+    const fp = this.fpLoad(), out = [];
+    for (const [k, v] of Object.entries(fp)) {
+      const [s, kd, day] = k.split('|');
+      if (s === sym && kd === kind && day >= fromDay) out.push({ day, data: v });
+    }
+    return out.sort((a, b) => a.day.localeCompare(b.day));
+  }
+  async fpHas(sym, kind, day) { return `${sym}|${kind}|${day}` in this.fpLoad(); }
 }
 
 class PgStorage {
@@ -57,7 +79,9 @@ class PgStorage {
       CREATE INDEX IF NOT EXISTS alerts_owner ON alerts(owner);
       CREATE TABLE IF NOT EXISTS alert_events (
         id TEXT PRIMARY KEY, owner TEXT NOT NULL, at BIGINT NOT NULL, data JSONB NOT NULL);
-      CREATE INDEX IF NOT EXISTS alert_events_owner_at ON alert_events(owner, at DESC);`);
+      CREATE INDEX IF NOT EXISTS alert_events_owner_at ON alert_events(owner, at DESC);
+      CREATE TABLE IF NOT EXISTS footprint (
+        sym TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, data JSONB NOT NULL, PRIMARY KEY (sym, kind, day));`);
   }
   async loadAlerts() { return (await this.pool.query('SELECT data FROM alerts')).rows.map((r) => r.data); }
   async loadHistory() {
@@ -74,5 +98,16 @@ class PgStorage {
   async deleteAlert(id) { await this.pool.query('DELETE FROM alerts WHERE id = $1', [id]); }
   async insertEvent(ev) {
     await this.pool.query('INSERT INTO alert_events(id, owner, at, data) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', [ev.id, ev.owner, ev.at, ev]);
+  }
+  async fpSave(sym, kind, day, data) {
+    await this.pool.query(`INSERT INTO footprint(sym, kind, day, data) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (sym, kind, day) DO UPDATE SET data = EXCLUDED.data`, [sym, kind, day, JSON.stringify(data)]);
+  }
+  async fpGet(sym, kind, fromDay) {
+    const r = await this.pool.query('SELECT day, data FROM footprint WHERE sym = $1 AND kind = $2 AND day >= $3 ORDER BY day', [sym, kind, fromDay]);
+    return r.rows;
+  }
+  async fpHas(sym, kind, day) {
+    return (await this.pool.query('SELECT 1 FROM footprint WHERE sym = $1 AND kind = $2 AND day = $3', [sym, kind, day])).rowCount > 0;
   }
 }

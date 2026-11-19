@@ -2,6 +2,7 @@
 // Logic SMC: shared/smc.js — © LuxAlgo, CC BY-NC-SA 4.0 (phi thương mại).
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import type { SmcResult } from '../../../shared/smc.js';
+import type { FpBar } from '../../../shared/footprint.js';
 
 export interface SmcSettings {
   enabled: boolean; mode: 'Historical' | 'Present';
@@ -158,4 +159,127 @@ export function drawOverlay(canvas: HTMLCanvasElement, chart: IChartApi, series:
       label(smc.swingTrend === 1 ? 'Strong Low' : 'Weak Low', Math.min(xr, rightEdge - 34), Y(smc.trailing.bottom), GREEN, false, 9);
     }
   }
+}
+
+// ======================= FOOTPRINT =======================
+
+export interface FpSettings {
+  enabled: boolean; mode: 'bidask' | 'delta' | 'volume'; rowTicks: number; // 0 = tự động
+  ratio: number; stack: number; minVol: number; markers: boolean; poc: boolean; stacks: boolean; summary: boolean; dim: boolean;
+}
+export const FP_UI_DEFAULTS: FpSettings = {
+  enabled: false, mode: 'bidask', rowTicks: 0, ratio: 3, stack: 3, minVol: 0, markers: true, poc: true, stacks: true, summary: true, dim: true,
+};
+export interface FpDraw { bars: FpBar[]; row: number; tick: number; label: string; estimatedPct: number; s: FpSettings }
+
+const kfmt = (v: number) => {
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + 'M';
+  if (a >= 1e4) return Math.round(v / 1e3) + 'k';
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+  return String(Math.round(v));
+};
+
+/** Vẽ footprint: mỗi nến là một cột các ô giá (bid x ask / delta / volume) */
+export function drawFootprint(canvas: HTMLCanvasElement, chart: IChartApi, series: ISeriesApi<'Candlestick'>, fp: FpDraw,
+  timeToIndex: Map<number, number>, dark: boolean) {
+  const ctx = canvas.getContext('2d')!;
+  const ts = chart.timeScale();
+  const w = ts.width();
+  const h = canvas.parentElement!.clientHeight - ts.height();
+  const X = (i: number) => ts.logicalToCoordinate(i as any) ?? NaN;
+  const Y = (p: number) => series.priceToCoordinate(p) ?? NaN;
+  const s = fp.s;
+  const bs = Math.abs(X(1) - X(0)) || 6;
+  const cellW = Math.max(2, bs * 0.92);
+  const GREEN = '#0ecb81', RED = '#f6465d', TXT = dark ? '#d9dee5' : '#1d232b', POC = '#f0b90b';
+  const showText = cellW >= 46;
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+  for (const b of fp.bars) {
+    const i = timeToIndex.get(b.t);
+    if (i === undefined) continue;
+    const xc = X(i);
+    if (!Number.isFinite(xc) || xc < -cellW || xc > w + cellW) continue;
+    const left = xc - cellW / 2;
+    let maxAbs = 1, maxVol = 1;
+    for (const r of b.rows) { maxAbs = Math.max(maxAbs, Math.abs(r.delta)); maxVol = Math.max(maxVol, r.vol); }
+    for (const r of b.rows) {
+      if (!r.vol) continue; // dòng chỉ có KL khớp định kỳ (ATO/ATC) — không có bên chủ động
+      const yTop = Y(r.p + fp.row - fp.tick / 2), yBot = Y(r.p - fp.tick / 2);
+      if (!Number.isFinite(yTop) || !Number.isFinite(yBot)) continue;
+      const ch = Math.max(1, yBot - yTop);
+      if (s.mode === 'volume') {
+        ctx.fillStyle = dark ? 'rgba(120,140,170,0.18)' : 'rgba(80,100,140,0.12)';
+        ctx.fillRect(left, yTop, cellW, ch);
+        ctx.fillStyle = dark ? 'rgba(90,150,255,0.55)' : 'rgba(40,100,220,0.45)';
+        ctx.fillRect(left, yTop + 0.5, cellW * (r.vol / maxVol), ch - 1);
+      } else {
+        const a = 0.1 + 0.55 * (Math.abs(r.delta) / maxAbs);
+        ctx.fillStyle = r.delta >= 0 ? `rgba(14,203,129,${a})` : `rgba(246,70,93,${a})`;
+        ctx.fillRect(left, yTop, cellW, ch);
+      }
+      // imbalance: viền đậm phía có imbalance
+      if (r.buyImb) { ctx.fillStyle = GREEN; ctx.fillRect(left + cellW - 3, yTop, 3, ch); }
+      if (r.sellImb) { ctx.fillStyle = RED; ctx.fillRect(left, yTop, 3, ch); }
+      if (s.poc && b.poc !== null && Math.abs(r.p - b.poc) < fp.row / 2) {
+        ctx.strokeStyle = POC; ctx.lineWidth = 1.5; ctx.strokeRect(left + 0.75, yTop + 0.75, cellW - 1.5, ch - 1.5);
+      }
+      if (showText && ch >= 9) {
+        const fs = Math.min(11, Math.floor(ch - 1));
+        ctx.textBaseline = 'middle';
+        const ym = yTop + ch / 2;
+        if (s.mode === 'bidask') {
+          ctx.font = `${r.sellImb ? '700 ' : ''}${fs}px ui-monospace, monospace`;
+          ctx.textAlign = 'right'; ctx.fillStyle = r.sellImb ? RED : TXT; ctx.fillText(kfmt(r.bid), xc - 5, ym);
+          ctx.font = `${fs}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.fillStyle = dark ? '#7d8794' : '#8a939f'; ctx.fillText('x', xc, ym);
+          ctx.font = `${r.buyImb ? '700 ' : ''}${fs}px ui-monospace, monospace`;
+          ctx.textAlign = 'left'; ctx.fillStyle = r.buyImb ? GREEN : TXT; ctx.fillText(kfmt(r.ask), xc + 5, ym);
+        } else {
+          ctx.font = `${fs}px ui-monospace, monospace`; ctx.textAlign = 'center';
+          ctx.fillStyle = s.mode === 'delta' ? (r.delta >= 0 ? GREEN : RED) : TXT;
+          ctx.fillText(s.mode === 'delta' ? (r.delta > 0 ? '+' : '') + kfmt(r.delta) : kfmt(r.vol), xc, ym);
+        }
+      }
+    }
+    const yH = Y(b.h + fp.row - fp.tick / 2), yL = Y(b.l - fp.tick / 2);
+    // stacked imbalance: vùng hỗ trợ/kháng cự kéo dài sang phải
+    if (s.stacks) {
+      for (const st of b.stacks) {
+        const y1 = Y(st.to + fp.row - fp.tick / 2), y2 = Y(st.from - fp.tick / 2);
+        ctx.fillStyle = st.dir === 1 ? 'rgba(14,203,129,0.10)' : 'rgba(246,70,93,0.10)';
+        ctx.fillRect(xc + cellW / 2, y1, w - (xc + cellW / 2), y2 - y1);
+        ctx.strokeStyle = st.dir === 1 ? GREEN : RED; ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(xc - cellW / 2, (y1 + y2) / 2); ctx.lineTo(w, (y1 + y2) / 2); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    if (s.markers) {
+      ctx.font = '700 9px system-ui, sans-serif'; ctx.textAlign = 'center';
+      const lbl = (t: string, y: number, color: string, above: boolean, dy = 0) => {
+        ctx.fillStyle = color; ctx.textBaseline = above ? 'bottom' : 'top'; ctx.fillText(t, xc, y + (above ? -2 - dy : 2 + dy));
+      };
+      let up = 0, dn = 0;
+      if (b.unfinishedHigh) { lbl('UA', yH, '#f0b90b', true, up); up += 10; }
+      if (b.exhaustHigh) { lbl('EX', yH, RED, true, up); up += 10; }
+      if (b.absorbHigh) { lbl('AB', yH, RED, true, up); up += 10; }
+      if (b.divBear) { lbl('▼Δ', yH, RED, true, up); up += 10; }
+      if (b.unfinishedLow) { lbl('UA', yL, '#f0b90b', false, dn); dn += 10; }
+      if (b.exhaustLow) { lbl('EX', yL, GREEN, false, dn); dn += 10; }
+      if (b.absorbLow) { lbl('AB', yL, GREEN, false, dn); dn += 10; }
+      if (b.divBull) { lbl('▲Δ', yL, GREEN, false, dn); dn += 10; }
+    }
+    if (s.summary && cellW >= 30) {
+      ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillStyle = b.delta >= 0 ? GREEN : RED; ctx.fillText((b.delta > 0 ? '+' : '') + kfmt(b.delta), xc, h - 14);
+      ctx.fillStyle = dark ? '#9aa3ae' : '#5d6670'; ctx.fillText(kfmt(b.vol) + (b.auction ? ` +${kfmt(b.auction)} ĐK` : ''), xc, h - 2);
+    }
+  }
+  // Nhãn thông tin
+  const info = `Footprint · ${fp.label} · dòng ${fp.row} · imbalance ${Math.round(s.ratio * 100)}%` + (fp.estimatedPct ? ` · ƯỚC LƯỢNG ${fp.estimatedPct}%` : ' · dữ liệu lệnh khớp thật');
+  ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  const tw = ctx.measureText(info).width;
+  ctx.fillStyle = dark ? 'rgba(17,21,28,0.85)' : 'rgba(255,255,255,0.85)'; ctx.fillRect(6, 6, tw + 12, 18);
+  ctx.fillStyle = fp.estimatedPct ? '#f0b90b' : TXT; ctx.fillText(info, 12, 9);
+  ctx.restore();
 }

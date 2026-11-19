@@ -157,6 +157,7 @@ export class VpsProvider {
   applyDeriv(x) {
     const alias = this.derivAlias?.get(x?.sym);
     if (!alias) return false;
+    this.ticks?.onTrade(alias, x, 1);
     const patch = normalizeVps(x, 1);
     const cur = this.store.stocks.get(alias);
     if (cur && patch.totVol !== undefined && patch.totVol < cur.totVol) return true; // dữ liệu cũ hơn
@@ -216,6 +217,7 @@ export class VpsProvider {
       if (!x?.sym) return;
       this.status.lastMsgAt = Date.now();
       if (this.applyDeriv({ ...x, marketId: 'DVX' })) return; // phái sinh: KL theo hợp đồng
+      if (x.lastVol !== undefined && x.lastPrice !== undefined) this.ticks?.onTrade(x.sym, x, config.volMult); // lệnh khớp từng giao dịch
       this.store.patchStock(x.sym, normalizeVps(x));
     };
     s.on('stock', onStock);

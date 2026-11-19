@@ -25,6 +25,7 @@ export class SimProvider extends VpsProvider {
         const sym = Math.random() < 0.5 ? [...hot][Math.floor(Math.random() * hot.size)] : syms[Math.floor(Math.random() * syms.length)];
         this.tick(sym);
       }
+      for (const ps of this.store.groups.PS || []) if (Math.random() < 0.8) this.tick(ps); // phái sinh giao dịch liên tục
       this.status.lastMsgAt = Date.now();
       for (const [code, ix] of this.store.indices) {
         const v = +(ix.value + (Math.random() - 0.5) * 0.6).toFixed(2);

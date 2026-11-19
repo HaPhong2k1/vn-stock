@@ -6,7 +6,8 @@ import { fmtPrice, fmtVol, priceClass } from '../lib/format';
 import { api } from '../lib/api';
 import { computeSMC } from '../../../shared/smc.js';
 import { backtestEmaCross, BT_DEFAULTS, type BtOptions, type BtResult } from '../../../shared/strategy.js';
-import { drawOverlay, SMC_UI_DEFAULTS, type SmcSettings } from '../lib/smcDraw';
+import { drawOverlay, drawFootprint, SMC_UI_DEFAULTS, FP_UI_DEFAULTS, type SmcSettings, type FpSettings, type FpDraw } from '../lib/smcDraw';
+import { analyzeFootprint, autoRowSize, tickOf } from '../../../shared/footprint.js';
 import { Backtest } from './Backtest';
 import { SymbolSearch } from './SymbolSearch';
 import { useGlobal } from '../lib/hooks';
@@ -24,6 +25,9 @@ const VN = 7 * 3600; // hiển thị giờ VN trên trục thời gian (thư vi�
 const RES = [['1', '1 phút'], ['5', '5 phút'], ['15', '15 phút'], ['1H', '1 giờ'], ['1D', 'Ngày'], ['1W', 'Tuần']] as const;
 const SPAN: Record<string, number> = { '1': 5, '5': 15, '15': 40, '1H': 120, '1D': 730, '1W': 2500 };
 const STEP: Record<string, number> = { '1': 60, '5': 300, '15': 900, '1H': 3600 };
+// Khung có footprint (giây); khung Tuần không hỗ trợ
+const FP_TF: Record<string, number> = { '1': 60, '5': 300, '15': 900, '1H': 3600, '1D': 86400 };
+const RES_LABEL: Record<string, string> = { '1': '1 phút', '5': '5 phút', '15': '15 phút', '1H': '1 giờ', '1D': 'Ngày', '1W': 'Tuần' };
 const C = { up: '#0ecb81', down: '#f6465d', ma20: '#f0a020', ma50: '#3b82f6', bb: '#8b95a5', rsi: '#a855f7', macd: '#3b82f6', sig: '#f0a020' };
 
 // Các đường MA (SMA giá đóng cửa) bật/tắt được
@@ -72,7 +76,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const [res, setRes] = useState<string>('1D');
   const [ov, setOv] = useState(() => load('chartOv', { ma6: false, ma10: false, ma20: true, ma50: true, ma200: false, bb: false, signals: true }));
   useEffect(() => saveLS('chartOv', ov), [ov]);
-  const [osc, setOsc] = useState<'RSI' | 'MACD'>('RSI');
+  const [osc, setOsc] = useState<'RSI' | 'MACD' | 'CVD'>('RSI');
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [legend, setLegend] = useState<Partial<Record<MaKey | 'rsi' | 'macd', number | null>>>({});
@@ -91,15 +95,22 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   useEffect(() => saveLS('emaCross', ema), [ema]);
   useEffect(() => saveLS('btOpts', { ...bt, end: undefined }), [bt]);
   const overlay = useRef<HTMLCanvasElement>(null);
-  const drawState = useRef<{ smc: any; idx: Map<number, number>; fill: any }>({ smc: null, idx: new Map(), fill: null });
-  const opts = useRef({ ov, osc, smcS, ema, bt });
-  opts.current = { ov, osc, smcS, ema, bt };
+  const drawState = useRef<{ smc: any; idx: Map<number, number>; fill: any; fp: FpDraw | null }>({ smc: null, idx: new Map(), fill: null, fp: null });
+  const [fpS, setFpS] = useState<FpSettings>(() => load('fp', FP_UI_DEFAULTS));
+  useEffect(() => saveLS('fp', fpS), [fpS]);
+  const [fpOpen, setFpOpen] = useState(false);
+  const [fpInfo, setFpInfo] = useState<{ n: number; est: number; days?: number; err?: string } | null>(null);
+  const fpRaw = useRef<any>(null);
+  const fpZoomed = useRef(false);
+  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st });
+  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st };
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   const redraw = useCallback(() => {
     const x = s.current;
     if (!overlay.current || !x.chart) return;
     const d = drawState.current;
     drawOverlay(overlay.current, x.chart, x.candle, d.smc, opts.current.smcS, d.idx, d.fill, dark);
+    if (d.fp) drawFootprint(overlay.current, x.chart, x.candle, d.fp, d.idx, dark);
   }, [dark]);
 
   // Tạo 2 biểu đồ: giá (+MA/BB/khối lượng) và dao động (RSI/MACD), đồng bộ trục thời gian
@@ -126,6 +137,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     x.rsi.createPriceLine({ price: 70, color: C.down, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
     x.rsi.createPriceLine({ price: 30, color: C.up, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
     x.macdH = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+    x.fpD = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceScaleId: 'fpd' });
+    c2.priceScale('fpd').applyOptions({ scaleMargins: { top: 0.55, bottom: 0 } });
+    x.cvd = c2.addLineSeries({ color: '#f0b90b', lineWidth: 2, priceLineVisible: false });
     x.macdL = c2.addLineSeries({ color: C.macd, lineWidth: 1, priceLineVisible: false });
     x.macdS = c2.addLineSeries({ color: C.sig, lineWidth: 1, priceLineVisible: false });
     let syncing = false;
@@ -149,7 +163,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const render = useCallback((fit = false) => {
     const b = bars.current, x = s.current;
     if (!x.candle) return;
-    const { ov, osc, smcS, ema, bt } = opts.current;
+    const { ov, osc, smcS, ema, bt, fpS, res: curRes, st: curSt } = opts.current;
     const closes = b.map((v) => v.close);
     // Smart Money Concepts (LuxAlgo)
     const smc = smcS.enabled && b.length > 10 ? computeSMC(b, { swingsLength: smcS.swingLength, internalConfluence: smcS.confluence }) : null;
@@ -167,6 +181,34 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     x.rsi.setData(osc === 'RSI' ? line(b, r) : []);
     x.macdL.setData(osc === 'MACD' ? line(b, md.line) : []);
     x.macdS.setData(osc === 'MACD' ? line(b, md.signal) : []);
+    // ---- Footprint
+    let fpd: FpDraw | null = null;
+    const raw = fpRaw.current;
+    if (fpS.enabled && raw && raw.symbol === sym && raw.tf === FP_TF[curRes] && raw.bars?.length) {
+      const tick = tickOf(curSt?.ex || 'HOSE', raw.bars[raw.bars.length - 1].c);
+      const row = fpS.rowTicks ? +(fpS.rowTicks * tick).toFixed(6) : autoRowSize(raw.bars, tick);
+      const bars = analyzeFootprint(raw.bars, row, { ratio: fpS.ratio, stack: fpS.stack, minVol: fpS.minVol });
+      fpd = { bars, row, tick, label: `${sym} ${RES_LABEL[curRes]}`, estimatedPct: raw.estimatedPct, s: fpS };
+    }
+    const fpIdx = new Map(b.map((v, i) => [v.time, i]));
+    const cvdMap = new Map((fpd?.bars || []).map((fb) => [fb.t, fb]));
+    x.cvd.setData(osc === 'CVD' ? b.map((v) => (cvdMap.has(v.time) ? { time: T(v.time), value: cvdMap.get(v.time)!.cvd } : { time: T(v.time) })) : []);
+    x.fpD.setData(osc === 'CVD' ? b.map((v) => { const fb = cvdMap.get(v.time); return fb ? { time: T(v.time), value: fb.delta, color: fb.delta >= 0 ? C.up + '88' : C.down + '88' } : { time: T(v.time) }; }) : []);
+    // Khi bật footprint: thang giá chỉ theo nến (bỏ qua MA/EMA/BB) để các ô giá đủ cao hiển thị số
+    const autoscale = fpd ? { autoscaleInfoProvider: () => null } : { autoscaleInfoProvider: undefined };
+    for (const k of [...MAS.map((m) => m.k), 'bbU', 'bbL', 'emaF', 'emaS']) x[k].applyOptions(autoscale);
+    const dimA = fpd && fpS.dim ? '40' : '';
+    x.candle.applyOptions({ upColor: C.up + dimA, downColor: C.down + dimA, wickUpColor: C.up + (dimA ? '99' : ''), wickDownColor: C.down + (dimA ? '99' : '') });
+    if (fpd && !fpZoomed.current && b.length) {
+      // phóng to để mỗi nến đủ rộng hiển thị số
+      fpZoomed.current = true;
+      const width = x.chart.timeScale().width() || 800;
+      const nBars = Math.max(6, Math.floor(width / 96));
+      const r = { from: b.length - nBars, to: b.length + 1 };
+      // đặt cho cả 2 biểu đồ (giá & dao động) — tránh biểu đồ phụ đồng bộ ngược làm mất mức phóng to
+      const apply = () => { x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r); };
+      requestAnimationFrame(apply); setTimeout(apply, 150);
+    }
     x.macdH.setData(osc === 'MACD' ? b.map((v, i) => (md.hist[i] === null ? { time: T(v.time) } : { time: T(v.time), value: md.hist[i]!, color: md.hist[i]! >= 0 ? C.up + '99' : C.down + '99' })) : []);
     // Đánh dấu tín hiệu: giá đóng cửa cắt lên MA20 = MUA, cắt xuống = BÁN
     const marks: SeriesMarker<UTCTimestamp>[] = [];
@@ -185,7 +227,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     }
     marks.sort((p, q) => (p.time as number) - (q.time as number));
     x.candle.setMarkers(marks);
-    drawState.current = { smc, idx: new Map(b.map((v, i) => [v.time, i])), fill: btr ? { fast: btr.emaFast, slow: btr.emaSlow } : null };
+    drawState.current = { smc, idx: fpIdx, fill: btr ? { fast: btr.emaFast, slow: btr.emaSlow } : null, fp: fpd };
     setBtRes(btr);
     requestAnimationFrame(() => redrawRef.current());
     const n = b.length - 1;
@@ -194,7 +236,26 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   }, []);
 
   redrawRef.current = redraw;
-  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, render]);
+  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, render]);
+
+  // Tải dữ liệu footprint & cập nhật định kỳ (3s khung phút, 5s khung ngày)
+  const fpAllowed = FP_TF[res] !== undefined;
+  useEffect(() => {
+    fpZoomed.current = false;
+    if (!fpS.enabled || !fpAllowed) { fpRaw.current = null; setFpInfo(null); render(); return; }
+    let dead = false;
+    const tf = FP_TF[res];
+    const load = () => fetch(`/api/footprint?symbol=${sym}&tf=${tf}`).then((r) => r.json()).then((j) => {
+      if (dead) return;
+      if (j.error) { setFpInfo({ n: 0, est: 0, err: j.error }); return; }
+      fpRaw.current = j;
+      setFpInfo({ n: j.bars.length, est: j.estimatedPct, days: j.days });
+      render();
+    }).catch((e) => !dead && setFpInfo({ n: 0, est: 0, err: String(e) }));
+    load();
+    const t = setInterval(load, tf === 86400 ? 5000 : 3000);
+    return () => { dead = true; clearInterval(t); };
+  }, [sym, res, fpS.enabled, fpAllowed, render]);
 
   useEffect(() => {
     let dead = false;
@@ -208,7 +269,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         bars.current = rows; lastTot.current = 0;
         render(true);
         // hiển thị khoảng ~120 nến gần nhất cho dễ nhìn
-        if (rows.length > 120) {
+        if (opts.current.fpS.enabled && FP_TF[res] !== undefined) { fpZoomed.current = false; render(); } // footprint tự phóng to
+        else if (rows.length > 120) {
           const r = { from: rows.length - 120, to: rows.length + 5 };
           s.current.chart.timeScale().setVisibleLogicalRange(r);
           requestAnimationFrame(() => s.current.chart.timeScale().setVisibleLogicalRange(r)); // sau khi biểu đồ phụ đồng bộ
@@ -282,9 +344,36 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         <button className={ov.signals ? 'on' : ''} onClick={() => setOv({ ...ov, signals: !ov.signals })}>▲ Tín hiệu MA20</button>
         <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>
         <button className="gear" onClick={() => setSmcOpen((v) => !v)} title="Cài đặt SMC">⚙</button>
+        <button className={fpS.enabled ? 'on' : ''} disabled={!fpAllowed} title={fpAllowed ? 'Footprint: KL mua/bán chủ động theo từng mức giá' : 'Footprint không hỗ trợ khung Tuần'}
+          onClick={() => setFpS({ ...fpS, enabled: !fpS.enabled })}>👣 Footprint</button>
+        <button className="gear" onClick={() => setFpOpen((v) => !v)} title="Cài đặt Footprint">⚙</button>
         <button className={ema.enabled ? 'on' : ''} onClick={() => setEma({ ...ema, enabled: !ema.enabled })}><i style={{ background: '#00BCD4' }} />EMA {bt.fast}/{bt.slow} BUY/SELL</button>
         {ema.enabled && !full && <button className={ema.showBt ? 'on' : ''} onClick={() => setEma({ ...ema, showBt: !ema.showBt })}>📈 Backtest</button>}
       </div>
+      {fpOpen && (
+        <div className="smc-panel">
+          <div className="smc-grid">
+            <label>Hiển thị <select value={fpS.mode} onChange={(e) => setFpS({ ...fpS, mode: e.target.value as FpSettings['mode'], enabled: true })}>
+              <option value="bidask">Bid x Ask</option><option value="delta">Delta</option><option value="volume">Volume profile</option></select></label>
+            <label>Bước giá/dòng <select value={fpS.rowTicks} onChange={(e) => setFpS({ ...fpS, rowTicks: +e.target.value })}>
+              {[0, 1, 2, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n ? `${n} tick` : 'Tự động'}</option>)}</select></label>
+            <label>Tỷ lệ imbalance <select value={fpS.ratio} onChange={(e) => setFpS({ ...fpS, ratio: +e.target.value })}>
+              {[1.5, 2, 2.5, 3, 4, 5].map((n) => <option key={n} value={n}>{n * 100}%</option>)}</select></label>
+            <label>Stacked ≥ <input type="number" min={2} max={6} value={fpS.stack} onChange={(e) => setFpS({ ...fpS, stack: Math.max(2, +e.target.value) })} /> dòng</label>
+            <label>KL tối thiểu <input type="number" min={0} step={100} value={fpS.minVol} onChange={(e) => setFpS({ ...fpS, minVol: Math.max(0, +e.target.value) })} /></label>
+            {([['poc', 'POC (giá KL lớn nhất)'], ['stacks', 'Vùng stacked imbalance'], ['markers', 'Nhãn UA / EX / AB / Δ phân kỳ'], ['summary', 'Delta & KL dưới mỗi nến'], ['dim', 'Làm mờ nến']] as [keyof FpSettings, string][]).map(([k, l]) => (
+              <label key={k}><input type="checkbox" checked={!!fpS[k]} onChange={(e) => setFpS({ ...fpS, [k]: e.target.checked })} /> {l}</label>
+            ))}
+          </div>
+          <div className="muted note">
+            {fpInfo?.err ? <span className="c-down">Lỗi: {fpInfo.err}</span> : fpInfo ? <>
+              {fpInfo.n} nến có dữ liệu{res === '1D' ? ' (lịch sử khung ngày được lưu dần mỗi phiên từ khi chạy hệ thống)' : ''}.
+              {fpInfo.est ? ` Dữ liệu ƯỚC LƯỢNG ${fpInfo.est}% (VN30F: suy chiều mua/bán từ giá chào).` : ' Dữ liệu từng lệnh khớp thật từ sàn (VPS).'}
+            </> : 'Bật 👣 Footprint để tải dữ liệu.'}
+            {' '}Bid = bán chủ động, Ask = mua chủ động. UA = phiên đấu giá chưa hoàn tất, EX = cạn kiệt, AB = hấp thụ, ▲Δ/▼Δ = phân kỳ delta. Phóng to biểu đồ để xem số.
+          </div>
+        </div>
+      )}
       {smcOpen && (
         <div className="smc-panel">
           <div className="smc-grid">
@@ -306,6 +395,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
       <div className="res-tabs ind">
         <button className={osc === 'RSI' ? 'on' : ''} onClick={() => setOsc('RSI')}>RSI(14) {f2(legend.rsi)}</button>
         <button className={osc === 'MACD' ? 'on' : ''} onClick={() => setOsc('MACD')}>MACD(12,26,9) {f2(legend.macd)}</button>
+        {fpS.enabled && fpAllowed && <button className={osc === 'CVD' ? 'on' : ''} onClick={() => setOsc('CVD')}>Delta & CVD</button>}
       </div>
       <div className="chart osc" ref={el2} />
       {!full && ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}

@@ -16,6 +16,7 @@ import { Analytics } from './analytics.js';
 import { AlertEngine, ALERT_TYPES } from './alerts.js';
 import { createStorage } from './storage.js';
 import { startKeepAlive } from './keepalive.js';
+import { TickCollector } from './ticks.js';
 
 const store = new MarketStore();
 const provider = config.provider === 'sim' ? new SimProvider(store) : new VpsProvider(store);
@@ -24,6 +25,8 @@ daily.loadCache();
 const analytics = new Analytics(store, daily);
 const storage = await createStorage();
 const alerts = new AlertEngine(store, analytics, storage);
+const ticks = new TickCollector(store, storage);
+provider.ticks = ticks;
 await alerts.init();
 const app = express();
 app.use(compression());
@@ -70,6 +73,15 @@ app.get('/api/symbols', wrap(() => [
   }),
   ...INDEX_DIR.map(([s, name, ex]) => ({ s, name, ex, type: 'index' })),
 ]));
+// Footprint: KL mua/bán chủ động theo từng mức giá trong mỗi nến
+const TF = new Set([60, 300, 900, 1800, 3600, 86400]);
+app.get('/api/footprint', async (req, res) => {
+  try {
+    const tf = Number(req.query.tf) || 60;
+    if (!TF.has(tf)) throw Object.assign(new Error('tf không hợp lệ'), { status: 400 });
+    res.json(await ticks.footprint(String(req.query.symbol || '').toUpperCase(), tf));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 app.get('/api/indices', (_req, res) => res.json([...store.indices.values()]));
 app.get('/api/history', async (req, res) => {
   try { res.json(await getHistory(req.query)); }
@@ -90,5 +102,5 @@ alerts.onFire((ev, a) => hub.sendTo(ev.owner, { type: 'alert', d: ev, alert: a }
 server.listen(config.port, () => console.log(`[server] http://localhost:${config.port} (provider=${config.provider})`));
 startKeepAlive();
 provider.start()
-  .then(() => daily.schedule(() => store.allSymbols()))
+  .then(async () => { daily.schedule(() => store.allSymbols()); await ticks.pin(store.groups.PS || []); ticks.maybeCollectDaily(); })
   .catch((e) => { console.error('[provider] khởi động lỗi', e); });

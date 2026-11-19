@@ -28,6 +28,15 @@ npm run start:sim      # chế độ giả lập: lấy snapshot thật rồi si
 
 Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localhost:5173, proxy `/api` và `/ws`).
 
+## 🖊 Màn hình biểu đồ kiểu TradingView/Fiant
+- **⟲ Đặt lại** (Alt+R): đưa khung nhìn & thang giá về mặc định.
+- **ƒx Chỉ báo**: hộp tìm kiếm chỉ báo. Trên giá: MA6/10/20/50/200, EMA 9/21/50/200, Bollinger, VWAP, SuperTrend,
+  Parabolic SAR, Ichimoku, Donchian, Keltner, SMC, Footprint, EMA cross. Khung dưới: RSI, MACD, Stochastic, Stoch RSI,
+  ADX/DMI, CCI, ATR, Williams %R, OBV, MFI, Delta & CVD. Nút *Khôi phục mặc định*.
+- **Thanh công cụ vẽ** (bên trái): đường xu hướng, tia, đường ngang/dọc, hình chữ nhật, Fibonacci thoái lui, đo giá,
+  văn bản, tẩy, nam châm (bắt dính OHLC), giữ công cụ, ẩn/hiện, hoàn tác (Ctrl+Z), xoá tất cả. Hình vẽ lưu theo mã trên trình duyệt.
+  Bấm chọn hình rồi nhấn Delete để xoá; Esc để huỷ.
+
 ## 👣 Footprint (Bid x Ask)
 Nút **👣 Footprint** trong khung biểu đồ: KL bán/mua chủ động theo từng mức giá, delta, POC, imbalance chéo (300%),
 stacked imbalance, unfinished auction, exhaustion, absorption, phân kỳ delta, tab **Delta & CVD**.

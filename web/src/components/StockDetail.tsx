@@ -11,6 +11,10 @@ import { analyzeFootprint, autoRowSize, tickOf } from '../../../shared/footprint
 import { Backtest } from './Backtest';
 import { SymbolSearch } from './SymbolSearch';
 import { useGlobal } from '../lib/hooks';
+import { INDICATORS, IND_BY_ID, type IndResult } from '../lib/indicatorDefs';
+import { IndicatorDialog, type BuiltIn } from './IndicatorDialog';
+import { DrawToolbar } from './DrawToolbar';
+import { TimeMap, drawShape, hitTest, loadDrawings, saveDrawings, TOOLS, type Drawing, type Pt, type Tool } from '../lib/drawings';
 
 const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const saveLS = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bỏ qua */ } };
@@ -76,10 +80,34 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const [res, setRes] = useState<string>('1D');
   const [ov, setOv] = useState(() => load('chartOv', { ma6: false, ma10: false, ma20: true, ma50: true, ma200: false, bb: false, signals: true }));
   useEffect(() => saveLS('chartOv', ov), [ov]);
-  const [osc, setOsc] = useState<'RSI' | 'MACD' | 'CVD'>('RSI');
+  const [osc, setOsc] = useState<string>(() => { try { return localStorage.getItem('osc') || 'rsi'; } catch { return 'rsi'; } });
+  useEffect(() => { try { localStorage.setItem('osc', osc); } catch { /* */ } }, [osc]);
+  const [inds, setInds] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('inds') || '[]'); } catch { return []; } });
+  useEffect(() => saveLS('inds', inds), [inds]);
+  const [indOpen, setIndOpen] = useState(false);
+  // ---- Công cụ vẽ
+  const [tool, setTool] = useState<Tool>('cursor');
+  const [drawColor, setDrawColor] = useState(() => { try { return localStorage.getItem('drawColor') || '#2962ff'; } catch { return '#2962ff'; } });
+  useEffect(() => { try { localStorage.setItem('drawColor', drawColor); } catch { /* */ } }, [drawColor]);
+  const [magnet, setMagnet] = useState(false);
+  const [keepTool, setKeepTool] = useState(false);
+  const [hideDraw, setHideDraw] = useState(false);
+  const [drawings, setDrawingsRaw] = useState<Drawing[]>(() => loadDrawings(sym));
+  // Lịch sử để hoàn tác (Ctrl+Z) mọi thao tác: vẽ, tẩy, xoá
+  const drawHist = useRef<Drawing[][]>([]);
+  const setDrawings = useCallback((fn: (d: Drawing[]) => Drawing[]) => setDrawingsRaw((cur) => {
+    const next = fn(cur);
+    if (next !== cur) { drawHist.current.push(cur); if (drawHist.current.length > 100) drawHist.current.shift(); }
+    return next;
+  }), []);
+  const undoDraw = useCallback(() => { const prev = drawHist.current.pop(); if (prev) setDrawingsRaw(prev); }, []);
+  useEffect(() => saveDrawings(sym, drawings), [sym, drawings]);
+  const [selId, setSelId] = useState<string | null>(null);
+  const pendingDraw = useRef<{ type: Drawing['type']; p1: Pt; p2: Pt } | null>(null);
+  const drawCv = useRef<HTMLCanvasElement>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
-  const [legend, setLegend] = useState<Partial<Record<MaKey | 'rsi' | 'macd', number | null>>>({});
+  const [legend, setLegend] = useState<Partial<Record<string, number | null>>>({});
   const el = useRef<HTMLDivElement>(null);
   const redrawRef = useRef<() => void>(() => {});
   const el2 = useRef<HTMLDivElement>(null);
@@ -102,8 +130,10 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const [fpInfo, setFpInfo] = useState<{ n: number; est: number; days?: number; err?: string } | null>(null);
   const fpRaw = useRef<any>(null);
   const fpZoomed = useRef(false);
-  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st });
-  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st };
+  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds });
+  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds };
+  const drawRef = useRef({ drawings, hideDraw, selId, tool });
+  drawRef.current = { drawings, hideDraw, selId, tool };
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
   const redraw = useCallback(() => {
     const x = s.current;
@@ -111,7 +141,21 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     const d = drawState.current;
     drawOverlay(overlay.current, x.chart, x.candle, d.smc, opts.current.smcS, d.idx, d.fill, dark);
     if (d.fp) drawFootprint(overlay.current, x.chart, x.candle, d.fp, d.idx, dark);
-  }, [dark]);
+    // ---- hình vẽ
+    const cv = drawCv.current;
+    if (cv) {
+      const w = x.chart.timeScale().width(), h = cv.parentElement!.clientHeight - x.chart.timeScale().height();
+      const dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
+      const ctx = cv.getContext('2d')!;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+      const { drawings, hideDraw, selId } = drawRef.current;
+      const c = { chart: x.chart, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w, h };
+      if (!hideDraw) for (const dr of drawings) drawShape(ctx, c, dr, dark, dr.id === selId);
+      const pd = pendingDraw.current;
+      if (pd) drawShape(ctx, c, { id: 'pending', type: pd.type, pts: pd.type === 'hline' || pd.type === 'vline' || pd.type === 'text' ? [pd.p1] : [pd.p1, pd.p2], color: drawColor }, dark, true);
+    }
+  }, [dark, drawColor]);
 
   // Tạo 2 biểu đồ: giá (+MA/BB/khối lượng) và dao động (RSI/MACD), đồng bộ trục thời gian
   useEffect(() => {
@@ -133,21 +177,26 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     for (const m of MAS) x[m.k] = ln(m.color, { lineWidth: m.w });
     x.bbU = ln(C.bb, { lineStyle: LineStyle.Dashed }); x.bbL = ln(C.bb, { lineStyle: LineStyle.Dashed });
     x.emaF = ln('#00BCD4', { lineWidth: 2 }); x.emaS = ln('#FF9800', { lineWidth: 2 });
-    x.rsi = c2.addLineSeries({ color: C.rsi, lineWidth: 1, priceLineVisible: false });
-    x.rsi.createPriceLine({ price: 70, color: C.down, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
-    x.rsi.createPriceLine({ price: 30, color: C.up, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true });
-    x.macdH = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+    // Khung dưới: 1 histogram + 3 đường dùng chung cho mọi chỉ báo dao động
+    x.oscH = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+    x.oscL = [0, 1, 2].map(() => c2.addLineSeries({ lineWidth: 1, priceLineVisible: false }));
+    x.oscLevels = [];
+    x.indSeries = new Map();
     x.fpD = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceScaleId: 'fpd' });
     c2.priceScale('fpd').applyOptions({ scaleMargins: { top: 0.55, bottom: 0 } });
     x.cvd = c2.addLineSeries({ color: '#f0b90b', lineWidth: 2, priceLineVisible: false });
-    x.macdL = c2.addLineSeries({ color: C.macd, lineWidth: 1, priceLineVisible: false });
-    x.macdS = c2.addLineSeries({ color: C.sig, lineWidth: 1, priceLineVisible: false });
     let syncing = false;
     const sync = (from: IChartApi, to: IChartApi) => from.timeScale().subscribeVisibleLogicalRangeChange((r) => {
       if (syncing || !r) return; syncing = true; to.timeScale().setVisibleLogicalRange(r); syncing = false;
     });
     sync(c, c2); sync(c2, c);
     x.chart = c; x.chart2 = c2;
+    c.subscribeClick((param) => {
+      if (drawRef.current.tool !== 'cursor' || !param.point) return;
+      const w = c.timeScale().width(), h = el.current!.clientHeight - c.timeScale().height();
+      const hit = hitTest({ chart: c, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w, h }, drawRef.current.drawings, param.point.x, param.point.y);
+      setSelId(hit ? hit.id : null);
+    });
     // Vẽ lại lớp SMC khi cuộn/zoom/đổi kích thước/kéo thang giá
     let raf = 0;
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => redrawRef.current()); };
@@ -170,7 +219,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     // EMA cross + backtest
     const btr = ema.enabled && b.length > 3 ? backtestEmaCross(b, bt) : null;
     const maVals = Object.fromEntries(MAS.map((m) => [m.k, sma(closes, m.n)])) as Record<MaKey, (number | null)[]>;
-    const m20 = maVals.ma20, bb = bollinger(closes, 20, 2), r = rsi(closes, 14), md = macd(closes);
+    const m20 = maVals.ma20, bb = bollinger(closes, 20, 2);
     const tc = smc && smcS.colorCandles ? (i: number) => (smc.internalTrendByBar[i] === 1 ? '#089981' : '#F23645') : null;
     x.candle.setData(b.map((v, i) => (tc ? { ...v, time: T(v.time), color: tc(i), wickColor: tc(i), borderColor: tc(i) } : { ...v, time: T(v.time) })));
     x.emaF.setData(btr ? line(b, btr.emaFast) : []);
@@ -178,9 +227,40 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     x.vol.setData(b.map((v) => ({ time: T(v.time), value: v.volume, color: v.close >= v.open ? C.up + '55' : C.down + '55' })));
     for (const m of MAS) x[m.k].setData(ov[m.k] ? line(b, maVals[m.k]) : []);
     x.bbU.setData(ov.bb ? line(b, bb.upper) : []); x.bbL.setData(ov.bb ? line(b, bb.lower) : []);
-    x.rsi.setData(osc === 'RSI' ? line(b, r) : []);
-    x.macdL.setData(osc === 'MACD' ? line(b, md.line) : []);
-    x.macdS.setData(osc === 'MACD' ? line(b, md.signal) : []);
+    // ---- Chỉ báo trên giá (danh mục ƒx): tạo/xoá series theo lựa chọn
+    const { inds } = opts.current;
+    const indLegend: Record<string, number | null> = {};
+    for (const def of INDICATORS.filter((d) => d.group === 'overlay')) {
+      const on = inds.includes(def.id) && b.length > 1;
+      let list: any[] | undefined = x.indSeries.get(def.id);
+      if (!on) { if (list) { list.forEach((se) => x.chart.removeSeries(se)); x.indSeries.delete(def.id); } continue; }
+      const r: IndResult = def.compute(b);
+      if (!list) {
+        list = r.lines.map((l) => x.chart.addLineSeries({
+          color: l.color, lineWidth: l.width || 1, lineStyle: l.dashed ? LineStyle.Dashed : LineStyle.Solid, priceLineVisible: false, lastValueVisible: false,
+          crosshairMarkerVisible: false, ...(l.dots ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.5 } : {}),
+        }));
+        x.indSeries.set(def.id, list);
+      }
+      r.lines.forEach((l, k) => list![k].setData(line(b, l.values)));
+      const lastV = r.lines[0].values[b.length - 1];
+      indLegend[def.id] = lastV ?? r.lines[1]?.values[b.length - 1] ?? null;
+    }
+    // ---- Khung dưới (dao động)
+    const oscDef = IND_BY_ID[osc];
+    const oscR: IndResult | null = oscDef && oscDef.group === 'osc' && b.length > 1 ? oscDef.compute(b) : null;
+    x.oscL.forEach((se: any, k: number) => {
+      const l = oscR?.lines[k];
+      se.applyOptions({ color: l?.color || '#888', lineWidth: l?.width || 1, visible: !!l });
+      se.setData(l ? line(b, l.values) : []);
+    });
+    x.oscH.setData(oscR?.hist ? b.map((v, i) => (oscR.hist!.values[i] === null ? { time: T(v.time) } : { time: T(v.time), value: oscR.hist!.values[i]!, color: oscR.hist!.colors?.[i] })) : []);
+    const lvKey = osc;
+    if (x.oscLevelKey !== lvKey) {
+      x.oscLevels.forEach((pl: any) => x.oscL[0].removePriceLine(pl));
+      x.oscLevels = (oscR?.levels || []).map((lv) => x.oscL[0].createPriceLine({ price: lv.v, color: lv.color, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true }));
+      x.oscLevelKey = lvKey;
+    }
     // ---- Footprint
     let fpd: FpDraw | null = null;
     const raw = fpRaw.current;
@@ -192,11 +272,12 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     }
     const fpIdx = new Map(b.map((v, i) => [v.time, i]));
     const cvdMap = new Map((fpd?.bars || []).map((fb) => [fb.t, fb]));
-    x.cvd.setData(osc === 'CVD' ? b.map((v) => (cvdMap.has(v.time) ? { time: T(v.time), value: cvdMap.get(v.time)!.cvd } : { time: T(v.time) })) : []);
-    x.fpD.setData(osc === 'CVD' ? b.map((v) => { const fb = cvdMap.get(v.time); return fb ? { time: T(v.time), value: fb.delta, color: fb.delta >= 0 ? C.up + '88' : C.down + '88' } : { time: T(v.time) }; }) : []);
+    x.cvd.setData(osc === 'cvd' ? b.map((v) => (cvdMap.has(v.time) ? { time: T(v.time), value: cvdMap.get(v.time)!.cvd } : { time: T(v.time) })) : []);
+    x.fpD.setData(osc === 'cvd' ? b.map((v) => { const fb = cvdMap.get(v.time); return fb ? { time: T(v.time), value: fb.delta, color: fb.delta >= 0 ? C.up + '88' : C.down + '88' } : { time: T(v.time) }; }) : []);
     // Khi bật footprint: thang giá chỉ theo nến (bỏ qua MA/EMA/BB) để các ô giá đủ cao hiển thị số
     const autoscale = fpd ? { autoscaleInfoProvider: () => null } : { autoscaleInfoProvider: undefined };
     for (const k of [...MAS.map((m) => m.k), 'bbU', 'bbL', 'emaF', 'emaS']) x[k].applyOptions(autoscale);
+    for (const list of x.indSeries.values()) for (const se of list) se.applyOptions(autoscale);
     const dimA = fpd && fpS.dim ? '40' : '';
     x.candle.applyOptions({ upColor: C.up + dimA, downColor: C.down + dimA, wickUpColor: C.up + (dimA ? '99' : ''), wickDownColor: C.down + (dimA ? '99' : '') });
     if (fpd && !fpZoomed.current && b.length) {
@@ -209,7 +290,6 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
       const apply = () => { x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r); };
       requestAnimationFrame(apply); setTimeout(apply, 150);
     }
-    x.macdH.setData(osc === 'MACD' ? b.map((v, i) => (md.hist[i] === null ? { time: T(v.time) } : { time: T(v.time), value: md.hist[i]!, color: md.hist[i]! >= 0 ? C.up + '99' : C.down + '99' })) : []);
     // Đánh dấu tín hiệu: giá đóng cửa cắt lên MA20 = MUA, cắt xuống = BÁN
     const marks: SeriesMarker<UTCTimestamp>[] = [];
     if (ov.signals) {
@@ -231,12 +311,105 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     setBtRes(btr);
     requestAnimationFrame(() => redrawRef.current());
     const n = b.length - 1;
-    setLegend({ ...Object.fromEntries(MAS.map((m) => [m.k, maVals[m.k][n]])), rsi: r[n], macd: md.hist[n] });
+    setLegend({ ...Object.fromEntries(MAS.map((m) => [m.k, maVals[m.k][n]])), ...indLegend, osc: oscR ? oscR.lines[0].values[n] : null });
     if (fit) { x.chart.timeScale().fitContent(); }
   }, []);
 
   redrawRef.current = redraw;
-  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, render]);
+  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, render]);
+  useEffect(() => { redrawRef.current(); }, [drawings, hideDraw, selId, drawColor]);
+  // khung dưới đang là CVD nhưng tắt footprint => về RSI
+  useEffect(() => { if (osc === 'cvd' && !fpS.enabled) setOsc('rsi'); }, [osc, fpS.enabled]);
+
+  /** Đặt lại biểu đồ: thang giá tự động + khung nhìn mặc định (≈120 nến gần nhất) */
+  const resetView = useCallback(() => {
+    const x = s.current, n = bars.current.length;
+    if (!x.chart) return;
+    x.chart.priceScale('right').applyOptions({ autoScale: true });
+    x.chart2.priceScale('right').applyOptions({ autoScale: true });
+    if (opts.current.fpS.enabled && FP_TF[opts.current.res] !== undefined) { fpZoomed.current = false; render(); return; }
+    const r = { from: Math.max(0, n - 120), to: n + 5 };
+    x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r);
+  }, [render]);
+
+  // ---- Phím tắt: Alt+R đặt lại, Esc huỷ vẽ, Delete xoá hình đang chọn, Ctrl+Z hoàn tác
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (e.altKey && e.key.toLowerCase() === 'r') { e.preventDefault(); resetView(); }
+      else if (e.key === 'Escape' && (pendingDraw.current || drawRef.current.tool !== 'cursor' || drawRef.current.selId)) {
+        e.preventDefault(); pendingDraw.current = null; setTool('cursor'); setSelId(null); redrawRef.current();
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawRef.current.selId) {
+        e.preventDefault(); const id = drawRef.current.selId; setDrawings((d) => d.filter((x) => x.id !== id)); setSelId(null);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoDraw(); }
+    };
+    addEventListener('keydown', k, true);
+    return () => removeEventListener('keydown', k, true);
+  }, [resetView, undoDraw, setDrawings]);
+
+  // ---- Vẽ bằng chuột trên lớp canvas (chỉ nhận chuột khi đang chọn công cụ vẽ)
+  const toPt = useCallback((e: React.PointerEvent): Pt | null => {
+    const x = s.current, cv = drawCv.current; if (!x.chart || !cv) return null;
+    const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    const li = x.chart.timeScale().coordinateToLogical(px), pr = x.candle.coordinateToPrice(py);
+    if (li === null || pr === null) return null;
+    const tm = new TimeMap(bars.current.map((b) => b.time));
+    const idx = Math.round(li as number);
+    let price = pr as number;
+    const bar = bars.current[idx];
+    if (magnet && bar) price = [bar.open, bar.high, bar.low, bar.close].reduce((a, v) => (Math.abs(v - price) < Math.abs(a - price) ? v : a));
+    return { t: tm.toTime(idx), p: +price.toFixed(4) };
+  }, [magnet]);
+  const finish = (d: Drawing) => { setDrawings((list) => [...list, d]); setSelId(d.id); pendingDraw.current = null; if (!keepTool) setTool('cursor'); };
+  const onDrawDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const pt = toPt(e); if (!pt) return;
+    if (tool === 'eraser') {
+      const x = s.current, cv = drawCv.current!; const r = cv.getBoundingClientRect();
+      const hit = hitTest({ chart: x.chart, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w: cv.clientWidth, h: cv.clientHeight }, drawings, e.clientX - r.left, e.clientY - r.top);
+      if (hit) setDrawings((d) => d.filter((q) => q.id !== hit.id));
+      return;
+    }
+    const def = TOOLS.find((t) => t.id === tool)!;
+    const id = Math.random().toString(36).slice(2);
+    const type = tool as Drawing['type'];
+    if (def.pts === 1) {
+      if (type === 'text') { const txt = prompt('Nội dung ghi chú:'); if (txt) finish({ id, type, pts: [pt], color: drawColor, text: txt }); else setTool('cursor'); return; }
+      finish({ id, type, pts: [pt], color: drawColor }); return;
+    }
+    const pd = pendingDraw.current;
+    if (!pd) { pendingDraw.current = { type, p1: pt, p2: pt }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }
+    else finish({ id, type: pd.type, pts: [pd.p1, pt], color: drawColor });
+  };
+  const onDrawMove = (e: React.PointerEvent) => {
+    const pd = pendingDraw.current; if (!pd) return;
+    const pt = toPt(e); if (pt) { pd.p2 = pt; redrawRef.current(); }
+  };
+  const onDrawUp = (e: React.PointerEvent) => {
+    const pd = pendingDraw.current; if (!pd) return;
+    // kéo-thả: nhả chuột xa điểm đầu => hoàn tất; bấm-nhả tại chỗ => chờ cú bấm thứ 2
+    const x = s.current;
+    const a = x.chart.timeScale().logicalToCoordinate(new TimeMap(bars.current.map((b) => b.time)).toIndex(pd.p1.t) as any) ?? 0;
+    const r = drawCv.current!.getBoundingClientRect();
+    if (Math.abs(e.clientX - r.left - a) > 6 || Math.abs((x.candle.priceToCoordinate(pd.p1.p) ?? 0) - (e.clientY - r.top)) > 6) {
+      finish({ id: Math.random().toString(36).slice(2), type: pd.type, pts: [pd.p1, pd.p2], color: drawColor });
+    }
+  };
+
+  /** Khôi phục bộ chỉ báo mặc định */
+  const resetIndicators = () => {
+    setOv({ ma6: false, ma10: false, ma20: true, ma50: true, ma200: false, bb: false, signals: true });
+    setInds([]); setOsc('rsi'); setSmcS({ ...smcS, enabled: false }); setFpS({ ...fpS, enabled: false }); setEma({ ...ema, enabled: false, showBt: false });
+  };
+  const builtins: BuiltIn[] = [
+    ...MAS.map((m) => ({ id: m.k, name: `MA ${m.n}`, desc: `Trung bình động đơn giản ${m.n} kỳ`, on: !!ov[m.k], toggle: () => setOv((o: any) => ({ ...o, [m.k]: !o[m.k] })), group: 'overlay' as const })),
+    { id: 'bb', name: 'Bollinger Bands (20, 2)', desc: 'Dải biến động quanh MA20', on: !!ov.bb, toggle: () => setOv((o: any) => ({ ...o, bb: !o.bb })), group: 'overlay' },
+    { id: 'sig', name: 'Tín hiệu MUA/BÁN cắt MA20', desc: 'Mũi tên khi giá đóng cửa cắt MA20', on: !!ov.signals, toggle: () => setOv((o: any) => ({ ...o, signals: !o.signals })), group: 'overlay' },
+    { id: 'smc', name: 'Smart Money Concepts [LuxAlgo]', desc: 'BOS/CHoCH, Order Block, FVG, EQH/EQL, Premium/Discount', on: smcS.enabled, toggle: () => setSmcS((v) => ({ ...v, enabled: !v.enabled })), group: 'special' },
+    { id: 'fp', name: 'Footprint (Bid x Ask)', desc: 'KL mua/bán chủ động theo từng mức giá', on: fpS.enabled, toggle: () => setFpS((v) => ({ ...v, enabled: !v.enabled })), group: 'special' },
+    { id: 'emax', name: `EMA cross ${bt.fast}/${bt.slow} BUY/SELL + Backtest`, desc: 'Chiến lược giao cắt EMA (che_trader)', on: ema.enabled, toggle: () => setEma((v: any) => ({ ...v, enabled: !v.enabled })), group: 'special' },
+  ];
 
   // Tải dữ liệu footprint & cập nhật định kỳ (3s khung phút, 5s khung ngày)
   const fpAllowed = FP_TF[res] !== undefined;
@@ -325,6 +498,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
           {st && <span className={`d-price ${pc(st.last)}`}>{isIndex ? st.last.toFixed(2) : fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
         </div>
         <div>
+          <button className="expand" onClick={() => setIndOpen(true)} title="Thêm/bớt chỉ báo kỹ thuật">ƒx Chỉ báo</button>
+          <button className="expand" onClick={resetView} title="Đặt lại biểu đồ (Alt+R): khung nhìn & thang giá mặc định">⟲ Đặt lại</button>
           <button className="expand" title={full ? 'Thoát toàn màn hình (Esc)' : 'Mở rộng biểu đồ toàn màn hình'} onClick={onFull}>{full ? '🗗 Thu nhỏ' : '⛶ Toàn màn hình'}</button>
           {!full && <button className="close" title={wide ? 'Thu hẹp khung' : 'Nới rộng khung'} onClick={onWide}>{wide ? '⇥' : '⇤'}</button>}
           <button className="close" onClick={onClose}>✕</button>
@@ -341,6 +516,11 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
           </button>
         ))}
         <button className={ov.bb ? 'on' : ''} onClick={() => setOv({ ...ov, bb: !ov.bb })}><i style={{ background: C.bb }} />Bollinger</button>
+        {inds.map((id) => IND_BY_ID[id] && (
+          <button key={id} className="on chip" title={`${IND_BY_ID[id].desc} — bấm để tắt`} onClick={() => setInds((l) => l.filter((x) => x !== id))}>
+            <i style={{ background: IND_BY_ID[id].color || '#888' }} />{IND_BY_ID[id].short} {f2(legend[id])} ✕
+          </button>
+        ))}
         <button className={ov.signals ? 'on' : ''} onClick={() => setOv({ ...ov, signals: !ov.signals })}>▲ Tín hiệu MA20</button>
         <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>
         <button className="gear" onClick={() => setSmcOpen((v) => !v)} title="Cài đặt SMC">⚙</button>
@@ -388,16 +568,30 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
           <div className="muted note">Smart Money Concepts © LuxAlgo — giấy phép CC BY-NC-SA 4.0 (chỉ dùng phi thương mại).</div>
         </div>
       )}
+      <div className="chart-area">
+      <DrawToolbar tool={tool} setTool={(t) => { pendingDraw.current = null; setTool(t); }} color={drawColor} setColor={setDrawColor}
+        magnet={magnet} setMagnet={setMagnet} keep={keepTool} setKeep={setKeepTool} hidden={hideDraw} setHidden={setHideDraw}
+        count={drawings.length} canUndo={drawHist.current.length > 0} onUndo={undoDraw}
+        onClear={() => { if (confirm(`Xoá ${drawings.length} hình vẽ của ${sym}?`)) setDrawings(() => []); }} onReset={resetView} />
+      <div className="charts">
       <div className="chart" ref={el}>
         <canvas ref={overlay} className="overlay" />
+        <canvas ref={drawCv} className={`draw-layer${tool !== 'cursor' ? ' active' : ''}${tool === 'eraser' ? ' eraser' : ''}`}
+          onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} />
+        {tool !== 'cursor' && <div className="draw-hint">{TOOLS.find((t) => t.id === tool)?.name} — {tool === 'eraser' ? 'bấm vào hình cần xoá' : TOOLS.find((t) => t.id === tool)!.pts === 2 ? 'bấm 2 điểm (hoặc kéo-thả)' : 'bấm 1 điểm'} · Esc để huỷ</div>}
         {err && <div className="err">Không tải được biểu đồ: {err}</div>}
       </div>
-      <div className="res-tabs ind">
-        <button className={osc === 'RSI' ? 'on' : ''} onClick={() => setOsc('RSI')}>RSI(14) {f2(legend.rsi)}</button>
-        <button className={osc === 'MACD' ? 'on' : ''} onClick={() => setOsc('MACD')}>MACD(12,26,9) {f2(legend.macd)}</button>
-        {fpS.enabled && fpAllowed && <button className={osc === 'CVD' ? 'on' : ''} onClick={() => setOsc('CVD')}>Delta & CVD</button>}
+      <div className="res-tabs ind osc-bar">
+        <select value={osc} onChange={(e) => setOsc(e.target.value)} title="Chỉ báo khung dưới">
+          {INDICATORS.filter((d) => d.group === 'osc').map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {fpS.enabled && fpAllowed && <option value="cvd">Delta & CVD (Footprint)</option>}
+        </select>
+        {osc !== 'cvd' && <span className="muted">{f2(legend.osc)}</span>}
+        {['rsi', 'macd', 'stoch', 'adx'].map((id) => <button key={id} className={osc === id ? 'on' : ''} onClick={() => setOsc(id)}>{IND_BY_ID[id].short}</button>)}
       </div>
       <div className="chart osc" ref={el2} />
+      </div>
+      </div>
       {!full && ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
       {!full && !isIndex && <div className="quick">
         <button onClick={() => quickAlert('MA20_CROSS_UP')}>🔔 Báo khi cắt lên MA20</button>
@@ -433,6 +627,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
           </dl>
         </div>
       )}
+      {indOpen && <IndicatorDialog active={inds} osc={osc} builtins={builtins} cvdAvailable={fpS.enabled && fpAllowed}
+        onToggle={(id) => setInds((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]))} onOsc={setOsc}
+        onReset={resetIndicators} onClose={() => setIndOpen(false)} />}
       {search !== null && <SymbolSearch initial={search} onClose={() => setSearch(null)} onSelect={(x) => { setSearch(null); if (x !== sym) onPick(x); }} />}
     </div>
   );

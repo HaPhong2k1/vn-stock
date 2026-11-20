@@ -78,7 +78,7 @@ export class TickCollector {
 
   resetEntry(e) {
     const st = this.store.stocks.get(e.sym);
-    Object.assign(e, { min: new Map(), lastTot: st?.totVol || 0, lastPrice: st?.last || 0, lastSide: 0, backfilled: false, estVol: 0, exactVol: 0, dirty: false });
+    Object.assign(e, { tape: [], min: new Map(), lastTot: st?.totVol || 0, lastPrice: st?.last || 0, lastSide: 0, backfilled: false, estVol: 0, exactVol: 0, dirty: false });
   }
 
   entry(sym) {
@@ -131,6 +131,9 @@ export class TickCollector {
   }
 
   add(e, t, p, v, side, est) {
+    // băng khớp lệnh (Time & Sales): giữ 500 lệnh gần nhất
+    e.tape.push([t, p, v, side, est ? 1 : 0]);
+    if (e.tape.length > 600) e.tape.splice(0, e.tape.length - 500);
     const mt = Math.floor(t / 60) * 60;
     let b = e.min.get(mt);
     if (!b) { b = newBar(mt, p); e.min.set(mt, b); }
@@ -196,6 +199,17 @@ export class TickCollector {
       this.log.info(`[ticks] ${sym}: ${rows.length} lệnh khớp`);
     })().finally(() => { e.loading = null; });
     return e.loading;
+  }
+
+  /** Danh sách lệnh khớp gần nhất (mới nhất trước) */
+  async trades(sym, limit = 100) {
+    const st = this.store.stocks.get(sym);
+    if (!st) throw Object.assign(new Error('Mã không tồn tại'), { status: 404 });
+    const e = this.entry(sym);
+    e.lastAccess = Date.now();
+    if (st.ex !== 'PS' && !e.backfilled) await this.backfill(sym);
+    const n = Math.min(500, Math.max(1, limit));
+    return { symbol: sym, unit: st.ex === 'PS' ? 'HĐ' : 'CP', trades: e.tape.slice(-n).reverse().map(([t, p, v, side, est]) => ({ t, p, v, side, est })) };
   }
 
   dayProfile(e) {

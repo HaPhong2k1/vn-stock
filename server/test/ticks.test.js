@@ -70,3 +70,14 @@ test('Đang có lệnh khớp chính xác từ socket: snapshot đi trước kh�
   assert.deepEqual(rows.find((r) => r[0] === 1851.2), [1851.2, 13, 0]);
   assert.equal(fp.estimatedPct, 0);
 });
+
+test('Băng khớp lệnh: mới nhất trước, có chiều', async () => {
+  const { tc } = setup();
+  await tc.pin(['VN30F1M']);
+  tc.onTrade('VN30F1M', { lastPrice: 1851, lastVol: 7, totalVol: 1007, side: 'B', time: '10:00:00' }, 1);
+  tc.onTrade('VN30F1M', { lastPrice: 1850.9, lastVol: 3, totalVol: 1010, side: 'S', time: '10:00:02' }, 1);
+  const r = await tc.trades('VN30F1M', 10);
+  assert.equal(r.trades.length, 2);
+  assert.deepEqual([r.trades[0].p, r.trades[0].v, r.trades[0].side], [1850.9, 3, -1]);
+  assert.equal(r.unit, 'HĐ');
+});

@@ -36,6 +36,12 @@ Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localho
 - **Thanh công cụ vẽ** (bên trái): đường xu hướng, tia, đường ngang/dọc, hình chữ nhật, Fibonacci thoái lui, đo giá,
   văn bản, tẩy, nam châm (bắt dính OHLC), giữ công cụ, ẩn/hiện, hoàn tác (Ctrl+Z), xoá tất cả. Hình vẽ lưu theo mã trên trình duyệt.
   Bấm chọn hình rồi nhấn Delete để xoá; Esc để huỷ.
+- **Kiểu biểu đồ:** Nến, Heikin Ashi, Thanh OHLC, Đường, Vùng. **Chú thích O/H/L/C/KL** theo con trỏ.
+- **Thanh dưới:** chọn nhanh 1N · 5N · 1T · 3T · 6T · YTD · 1 năm · Tất cả (tự đổi khung phù hợp), 📷 chụp ảnh PNG, AUTO / LOG.
+- **⏪ Replay:** chọn 1 nến, các nến sau bị ẩn; phát 1–10x, tiến/lùi từng nến — luyện giao dịch như TradingView.
+- **☰ Bảng phụ** (toàn màn hình): ★ Danh mục realtime · **Khớp lệnh** (Time & Sales, M/B chủ động, nổi bật lệnh lớn) ·
+  **Thông tin** (biên độ ngày & ATR, hiệu suất 1T→1N, RSI/Stoch/MA20/EMA200 khung ngày & tuần). API: `GET /api/trades?symbol=FPT&limit=100`.
+- Ý tưởng giao diện tham khảo từ tradoor terminal (AGPL-3.0) và TradingView — **không sao chép mã nguồn**, viết lại hoàn toàn.
 
 ## 👣 Footprint (Bid x Ask)
 Nút **👣 Footprint** trong khung biểu đồ: KL bán/mua chủ động theo từng mức giá, delta, POC, imbalance chéo (300%),

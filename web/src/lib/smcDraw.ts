@@ -279,7 +279,7 @@ export function drawFootprint(canvas: HTMLCanvasElement, chart: IChartApi, serie
   const info = `Footprint · ${fp.label} · dòng ${fp.row} · imbalance ${Math.round(s.ratio * 100)}%` + (fp.estimatedPct ? ` · ƯỚC LƯỢNG ${fp.estimatedPct}%` : ' · dữ liệu lệnh khớp thật');
   ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   const tw = ctx.measureText(info).width;
-  ctx.fillStyle = dark ? 'rgba(17,21,28,0.85)' : 'rgba(255,255,255,0.85)'; ctx.fillRect(6, 6, tw + 12, 18);
-  ctx.fillStyle = fp.estimatedPct ? '#f0b90b' : TXT; ctx.fillText(info, 12, 9);
+  ctx.fillStyle = dark ? 'rgba(17,21,28,0.85)' : 'rgba(255,255,255,0.85)'; ctx.fillRect(6, 26, tw + 12, 18);
+  ctx.fillStyle = fp.estimatedPct ? '#f0b90b' : TXT; ctx.fillText(info, 12, 29); // dưới dòng chú thích OHLC
   ctx.restore();
 }

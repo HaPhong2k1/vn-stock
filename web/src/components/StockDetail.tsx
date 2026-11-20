@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, type SeriesMarker, type UTCTimestamp, LineStyle } from 'lightweight-charts';
+import { createChart, type IChartApi, type ISeriesApi, type SeriesMarker, type UTCTimestamp, LineStyle, PriceScaleMode } from 'lightweight-charts';
 import { sma, rsi, macd, bollinger, crossUp, crossDown } from '../../../shared/indicators.js';
 import { useStock } from '../lib/hooks';
 import { fmtPrice, fmtVol, priceClass } from '../lib/format';
@@ -14,6 +14,7 @@ import { useGlobal } from '../lib/hooks';
 import { INDICATORS, IND_BY_ID, type IndResult } from '../lib/indicatorDefs';
 import { IndicatorDialog, type BuiltIn } from './IndicatorDialog';
 import { DrawToolbar } from './DrawToolbar';
+import { SidePanel } from './SidePanel';
 import { TimeMap, drawShape, hitTest, loadDrawings, saveDrawings, TOOLS, type Drawing, type Pt, type Tool } from '../lib/drawings';
 
 const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
@@ -50,9 +51,28 @@ const T = (t: number) => (t + VN) as UTCTimestamp;
 const line = (bars: Bar[], vals: (number | null)[]) =>
   bars.map((b, i) => (vals[i] === null ? { time: T(b.time) } : { time: T(b.time), value: vals[i] as number }));
 
+// Kiểu biểu đồ
+const CHART_TYPES = [['candles', 'Nến'], ['ha', 'Heikin Ashi'], ['bars', 'Thanh OHLC'], ['line', 'Đường'], ['area', 'Vùng']] as const;
+type ChartType = typeof CHART_TYPES[number][0];
+/** Nến Heikin Ashi */
+function heikinAshi(b: Bar[]): Bar[] {
+  const out: Bar[] = [];
+  for (let i = 0; i < b.length; i++) {
+    const c = (b[i].open + b[i].high + b[i].low + b[i].close) / 4;
+    const o = i === 0 ? (b[i].open + b[i].close) / 2 : (out[i - 1].open + out[i - 1].close) / 2;
+    out.push({ ...b[i], open: o, close: c, high: Math.max(b[i].high, o, c), low: Math.min(b[i].low, o, c) });
+  }
+  return out;
+}
+// Chọn nhanh khoảng thời gian (như TradingView): khoảng -> khung thời gian phù hợp + số ngày lịch
+const RANGES: { k: string; res: string; days: number | 'ytd' | 'all' }[] = [
+  { k: '1N', res: '1', days: 1 }, { k: '5N', res: '5', days: 5 }, { k: '1T', res: '1H', days: 31 }, { k: '3T', res: '1D', days: 92 },
+  { k: '6T', res: '1D', days: 183 }, { k: 'YTD', res: '1D', days: 'ytd' }, { k: '1 năm', res: '1D', days: 365 }, { k: 'Tất cả', res: '1W', days: 'all' },
+];
+
 const INDEX_CODE: Record<string, string> = { VNINDEX: '10', VN30: '11', HNX: '02', HNX30: '12', UPCOM: '03' };
 
-export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void; full: boolean; onFull: () => void; onPick: (s: string) => void }) {
+export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, watch = [] }: { sym: string; onClose: () => void; wide: boolean; onWide: () => void; full: boolean; onFull: () => void; onPick: (s: string) => void; watch?: string[] }) {
   const stock = useStock(sym);
   const g = useGlobal();
   // Chỉ số (VNINDEX, VN30...): dựng dữ liệu "giả cổ phiếu" từ chỉ số realtime để header & nến cuối vẫn cập nhật
@@ -85,6 +105,19 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const [inds, setInds] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('inds') || '[]'); } catch { return []; } });
   useEffect(() => saveLS('inds', inds), [inds]);
   const [indOpen, setIndOpen] = useState(false);
+  const [chartType, setChartType] = useState<ChartType>(() => { try { return (localStorage.getItem('chartType') as ChartType) || 'candles'; } catch { return 'candles'; } });
+  useEffect(() => { try { localStorage.setItem('chartType', chartType); } catch { /* */ } }, [chartType]);
+  const [logScale, setLogScale] = useState(false);
+  const [autoScale, setAutoScale] = useState(true);
+  const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem('sideOpen') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('sideOpen', sideOpen ? '1' : '0'); } catch { /* */ } }, [sideOpen]);
+  const [ohlc, setOhlc] = useState<Bar | null>(null);
+  const pendingRange = useRef<string | null>(null);
+  const [rangeKey, setRangeKey] = useState<string | null>(null);
+  // ---- Replay (tua lại thị trường)
+  const [replay, setReplay] = useState<{ mode: 'off' | 'select' | 'on'; idx: number; playing: boolean; speed: number }>({ mode: 'off', idx: 0, playing: false, speed: 1 });
+  const replayRef = useRef(replay);
+  replayRef.current = replay;
   // ---- Công cụ vẽ
   const [tool, setTool] = useState<Tool>('cursor');
   const [drawColor, setDrawColor] = useState(() => { try { return localStorage.getItem('drawColor') || '#2962ff'; } catch { return '#2962ff'; } });
@@ -130,8 +163,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   const [fpInfo, setFpInfo] = useState<{ n: number; est: number; days?: number; err?: string } | null>(null);
   const fpRaw = useRef<any>(null);
   const fpZoomed = useRef(false);
-  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds });
-  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds };
+  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType });
+  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType };
   const drawRef = useRef({ drawings, hideDraw, selId, tool });
   drawRef.current = { drawings, hideDraw, selId, tool };
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
@@ -176,6 +209,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     const ln = (color: string, extra = {}) => c.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...extra });
     for (const m of MAS) x[m.k] = ln(m.color, { lineWidth: m.w });
     x.bbU = ln(C.bb, { lineStyle: LineStyle.Dashed }); x.bbL = ln(C.bb, { lineStyle: LineStyle.Dashed });
+    x.barS = c.addBarSeries({ upColor: C.up, downColor: C.down, priceLineVisible: false, lastValueVisible: false, visible: false });
+    x.lineS = c.addLineSeries({ color: '#2962ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
+    x.areaS = c.addAreaSeries({ lineColor: '#2962ff', topColor: 'rgba(41,98,255,0.35)', bottomColor: 'rgba(41,98,255,0.02)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, visible: false });
     x.emaF = ln('#00BCD4', { lineWidth: 2 }); x.emaS = ln('#FF9800', { lineWidth: 2 });
     // Khung dưới: 1 histogram + 3 đường dùng chung cho mọi chỉ báo dao động
     x.oscH = c2.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
@@ -191,7 +227,23 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     });
     sync(c, c2); sync(c2, c);
     x.chart = c; x.chart2 = c2;
+    // Chú thích O/H/L/C theo con trỏ
+    let rafL = 0;
+    c.subscribeCrosshairMove((param) => {
+      cancelAnimationFrame(rafL);
+      rafL = requestAnimationFrame(() => {
+        if (!param.time || param.logical === undefined) { setOhlc(null); return; }
+        const i = Math.round(param.logical as number);
+        setOhlc(bars.current[i] || null);
+      });
+    });
     c.subscribeClick((param) => {
+      // Replay: chọn nến bắt đầu
+      if (replayRef.current.mode === 'select' && param.logical !== undefined) {
+        const idx = Math.max(1, Math.min(bars.current.length - 1, Math.round(param.logical as number)));
+        setReplay((r) => ({ ...r, mode: 'on', idx, playing: false }));
+        return;
+      }
       if (drawRef.current.tool !== 'cursor' || !param.point) return;
       const w = c.timeScale().width(), h = el.current!.clientHeight - c.timeScale().height();
       const hit = hitTest({ chart: c, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w, h }, drawRef.current.drawings, param.point.x, param.point.y);
@@ -210,7 +262,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
 
   /** Tính lại toàn bộ chỉ báo từ mảng nến và vẽ lại */
   const render = useCallback((fit = false) => {
-    const b = bars.current, x = s.current;
+    const rp = replayRef.current;
+    const b = rp.mode === 'on' ? bars.current.slice(0, rp.idx + 1) : bars.current, x = s.current;
     if (!x.candle) return;
     const { ov, osc, smcS, ema, bt, fpS, res: curRes, st: curSt } = opts.current;
     const closes = b.map((v) => v.close);
@@ -221,7 +274,13 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     const maVals = Object.fromEntries(MAS.map((m) => [m.k, sma(closes, m.n)])) as Record<MaKey, (number | null)[]>;
     const m20 = maVals.ma20, bb = bollinger(closes, 20, 2);
     const tc = smc && smcS.colorCandles ? (i: number) => (smc.internalTrendByBar[i] === 1 ? '#089981' : '#F23645') : null;
-    x.candle.setData(b.map((v, i) => (tc ? { ...v, time: T(v.time), color: tc(i), wickColor: tc(i), borderColor: tc(i) } : { ...v, time: T(v.time) })));
+    const { chartType } = opts.current;
+    const cb = chartType === 'ha' ? heikinAshi(b) : b;
+    x.candle.setData(cb.map((v, i) => (tc ? { ...v, time: T(v.time), color: tc(i), wickColor: tc(i), borderColor: tc(i) } : { ...v, time: T(v.time) })));
+    x.barS.applyOptions({ visible: chartType === 'bars' }); x.lineS.applyOptions({ visible: chartType === 'line' }); x.areaS.applyOptions({ visible: chartType === 'area' });
+    x.barS.setData(chartType === 'bars' ? b.map((v) => ({ ...v, time: T(v.time) })) : []);
+    x.lineS.setData(chartType === 'line' ? b.map((v) => ({ time: T(v.time), value: v.close })) : []);
+    x.areaS.setData(chartType === 'area' ? b.map((v) => ({ time: T(v.time), value: v.close })) : []);
     x.emaF.setData(btr ? line(b, btr.emaFast) : []);
     x.emaS.setData(btr ? line(b, btr.emaSlow) : []);
     x.vol.setData(b.map((v) => ({ time: T(v.time), value: v.volume, color: v.close >= v.open ? C.up + '55' : C.down + '55' })));
@@ -279,7 +338,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
     for (const k of [...MAS.map((m) => m.k), 'bbU', 'bbL', 'emaF', 'emaS']) x[k].applyOptions(autoscale);
     for (const list of x.indSeries.values()) for (const se of list) se.applyOptions(autoscale);
     const dimA = fpd && fpS.dim ? '40' : '';
-    x.candle.applyOptions({ upColor: C.up + dimA, downColor: C.down + dimA, wickUpColor: C.up + (dimA ? '99' : ''), wickDownColor: C.down + (dimA ? '99' : '') });
+    if (['bars', 'line', 'area'].includes(chartType)) x.candle.applyOptions({ upColor: 'rgba(0,0,0,0)', downColor: 'rgba(0,0,0,0)', wickUpColor: 'rgba(0,0,0,0)', wickDownColor: 'rgba(0,0,0,0)' });
+    else x.candle.applyOptions({ upColor: C.up + dimA, downColor: C.down + dimA, wickUpColor: C.up + (dimA ? '99' : ''), wickDownColor: C.down + (dimA ? '99' : '') });
     if (fpd && !fpZoomed.current && b.length) {
       // phóng to để mỗi nến đủ rộng hiển thị số
       fpZoomed.current = true;
@@ -316,7 +376,54 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
   }, []);
 
   redrawRef.current = redraw;
-  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, render]);
+  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, chartType, render]);
+  // Replay: render lại khi đổi vị trí; tự phát theo tốc độ
+  useEffect(() => { render(); if (replay.mode === 'on') s.current.chart?.timeScale().scrollToRealTime(); }, [replay.mode, replay.idx, render]);
+  useEffect(() => {
+    if (replay.mode !== 'on' || !replay.playing) return;
+    const t = setInterval(() => setReplay((r) => {
+      if (r.idx >= bars.current.length - 1) return { ...r, playing: false };
+      return { ...r, idx: r.idx + 1 };
+    }), 1000 / replay.speed);
+    return () => clearInterval(t);
+  }, [replay.mode, replay.playing, replay.speed]);
+  // LOG / AUTO
+  useEffect(() => {
+    const x = s.current; if (!x.chart) return;
+    x.chart.priceScale('right').applyOptions({ mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal, autoScale });
+  }, [logScale, autoScale]);
+  /** Chọn khoảng thời gian: đổi khung phù hợp rồi phóng tới khoảng đó sau khi dữ liệu tải xong */
+  const applyRange = useCallback((k: string) => {
+    const x = s.current, b = bars.current;
+    const r = RANGES.find((q) => q.k === k)!;
+    if (!x.chart || !b.length) return;
+    const now = Date.now() / 1000;
+    let from: number;
+    if (r.days === 'all') from = 0;
+    else if (r.days === 'ytd') from = Date.UTC(new Date().getUTCFullYear(), 0, 1) / 1000;
+    else if (r.days === 1) { const lastDay = Math.floor((b[b.length - 1].time + 7 * 3600) / 86400); from = lastDay * 86400 - 7 * 3600; } // phiên gần nhất
+    else from = now - r.days * 86400;
+    let i = b.findIndex((v) => v.time >= from); if (i < 0) i = 0;
+    const range = { from: i - 0.5, to: b.length + 2 };
+    x.chart.timeScale().setVisibleLogicalRange(range); x.chart2.timeScale().setVisibleLogicalRange(range);
+  }, []);
+  const chooseRange = (k: string) => {
+    const r = RANGES.find((q) => q.k === k)!;
+    setRangeKey(k);
+    if (r.res !== res) { pendingRange.current = k; setRes(r.res); } else applyRange(k);
+  };
+  /** Chụp ảnh biểu đồ (kèm lớp SMC/footprint/hình vẽ) và tải về PNG */
+  const screenshot = () => {
+    const x = s.current; if (!x.chart) return;
+    const base: HTMLCanvasElement = x.chart.takeScreenshot();
+    const out = document.createElement('canvas'); out.width = base.width; out.height = base.height;
+    const ctx = out.getContext('2d')!;
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor || '#000'; ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(base, 0, 0);
+    for (const cv of [overlay.current, drawCv.current]) if (cv && cv.width) ctx.drawImage(cv, 0, 0); // cùng tỷ lệ devicePixelRatio với ảnh chụp
+    ctx.font = '600 14px system-ui, sans-serif'; ctx.fillStyle = '#888'; ctx.fillText(`${sym} · ${RES_LABEL[res]} · ${new Date().toLocaleString('vi-VN')}`, 10, 20);
+    const a = document.createElement('a'); a.download = `${sym}_${res}_${Date.now()}.png`; a.href = out.toDataURL('image/png'); a.click();
+  };
   useEffect(() => { redrawRef.current(); }, [drawings, hideDraw, selId, drawColor]);
   // khung dưới đang là CVD nhưng tắt footprint => về RSI
   useEffect(() => { if (osc === 'cvd' && !fpS.enabled) setOsc('rsi'); }, [osc, fpS.enabled]);
@@ -338,6 +445,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
       if (e.altKey && e.key.toLowerCase() === 'r') { e.preventDefault(); resetView(); }
+      else if (e.key === 'Escape' && replayRef.current.mode !== 'off') { e.preventDefault(); setReplay((r) => ({ ...r, mode: 'off', playing: false })); }
       else if (e.key === 'Escape' && (pendingDraw.current || drawRef.current.tool !== 'cursor' || drawRef.current.selId)) {
         e.preventDefault(); pendingDraw.current = null; setTool('cursor'); setSelId(null); redrawRef.current();
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawRef.current.selId) {
@@ -442,7 +550,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         bars.current = rows; lastTot.current = 0;
         render(true);
         // hiển thị khoảng ~120 nến gần nhất cho dễ nhìn
-        if (opts.current.fpS.enabled && FP_TF[res] !== undefined) { fpZoomed.current = false; render(); } // footprint tự phóng to
+        if (pendingRange.current) { const k = pendingRange.current; pendingRange.current = null; requestAnimationFrame(() => applyRange(k)); }
+        else if (opts.current.fpS.enabled && FP_TF[res] !== undefined) { fpZoomed.current = false; render(); } // footprint tự phóng to
         else if (rows.length > 120) {
           const r = { from: rows.length - 120, to: rows.length + 5 };
           s.current.chart.timeScale().setVisibleLogicalRange(r);
@@ -451,7 +560,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
       })
       .catch((e) => !dead && setErr(String(e)));
     return () => { dead = true; };
-  }, [sym, res, render]);
+  }, [sym, res, render, applyRange]);
 
   // Cập nhật nến cuối theo từng lệnh khớp; vẽ lại tối đa ~3 lần/giây
   const pending = useRef(false);
@@ -498,7 +607,13 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
           {st && <span className={`d-price ${pc(st.last)}`}>{isIndex ? st.last.toFixed(2) : fmtPrice(st.last || st.ref)} <small>{st.chg > 0 ? '+' : ''}{st.chg?.toFixed(2)} ({st.chgPc?.toFixed(2)}%)</small></span>}
         </div>
         <div>
+          <select className="expand" value={chartType} onChange={(e) => setChartType(e.target.value as ChartType)} title="Kiểu biểu đồ">
+            {CHART_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
           <button className="expand" onClick={() => setIndOpen(true)} title="Thêm/bớt chỉ báo kỹ thuật">ƒx Chỉ báo</button>
+          <button className={`expand${replay.mode !== 'off' ? ' on' : ''}`} title="Replay: tua lại thị trường từ một nến bất kỳ để luyện tập"
+            onClick={() => setReplay((r) => (r.mode === 'off' ? { ...r, mode: 'select', playing: false } : { ...r, mode: 'off', playing: false }))}>⏪ Replay</button>
+          {full && <button className={`expand${sideOpen ? ' on' : ''}`} onClick={() => setSideOpen((v) => !v)} title="Bảng phụ: Danh mục · Khớp lệnh · Thông tin">☰ Bảng phụ</button>}
           <button className="expand" onClick={resetView} title="Đặt lại biểu đồ (Alt+R): khung nhìn & thang giá mặc định">⟲ Đặt lại</button>
           <button className="expand" title={full ? 'Thoát toàn màn hình (Esc)' : 'Mở rộng biểu đồ toàn màn hình'} onClick={onFull}>{full ? '🗗 Thu nhỏ' : '⛶ Toàn màn hình'}</button>
           {!full && <button className="close" title={wide ? 'Thu hẹp khung' : 'Nới rộng khung'} onClick={onWide}>{wide ? '⇥' : '⇤'}</button>}
@@ -579,6 +694,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         <canvas ref={drawCv} className={`draw-layer${tool !== 'cursor' ? ' active' : ''}${tool === 'eraser' ? ' eraser' : ''}`}
           onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} />
         {st?.ex === 'PS' && <PsPanel st={st} vn30={g.indices.get('11')?.value} />}
+        <OhlcLegend bar={ohlc || bars.current[replay.mode === 'on' ? replay.idx : bars.current.length - 1]} res={res} />
+        {replay.mode === 'select' && <div className="draw-hint">⏪ Bấm vào nến để bắt đầu replay từ đó — các nến sau sẽ bị ẩn · Esc/⏪ để huỷ</div>}
         {tool !== 'cursor' && <div className="draw-hint">{TOOLS.find((t) => t.id === tool)?.name} — {tool === 'eraser' ? 'bấm vào hình cần xoá' : TOOLS.find((t) => t.id === tool)!.pts === 2 ? 'bấm 2 điểm (hoặc kéo-thả)' : 'bấm 1 điểm'} · Esc để huỷ</div>}
         {err && <div className="err">Không tải được biểu đồ: {err}</div>}
       </div>
@@ -591,7 +708,30 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         {['rsi', 'macd', 'stoch', 'adx'].map((id) => <button key={id} className={osc === id ? 'on' : ''} onClick={() => setOsc(id)}>{IND_BY_ID[id].short}</button>)}
       </div>
       <div className="chart osc" ref={el2} />
+      <div className="chart-foot">
+        {replay.mode === 'on' ? (
+          <div className="replay-ctl">
+            <b>⏪ Replay</b>
+            <button onClick={() => setReplay((r) => ({ ...r, idx: Math.max(1, r.idx - 1), playing: false }))} title="Lùi 1 nến">⏮</button>
+            <button onClick={() => setReplay((r) => ({ ...r, playing: !r.playing }))} title="Phát / Dừng">{replay.playing ? '⏸' : '▶'}</button>
+            <button onClick={() => setReplay((r) => ({ ...r, idx: Math.min(bars.current.length - 1, r.idx + 1), playing: false }))} title="Tiến 1 nến">⏭</button>
+            <select value={replay.speed} onChange={(e) => setReplay((r) => ({ ...r, speed: +e.target.value }))}>{[1, 2, 3, 5, 10].map((v) => <option key={v} value={v}>{v}x</option>)}</select>
+            <span className="muted">{bars.current[replay.idx] ? new Date((bars.current[replay.idx].time + VN) * 1000).toISOString().slice(0, 16).replace('T', ' ') : ''} · {replay.idx + 1}/{bars.current.length}</span>
+            <button onClick={() => setReplay((r) => ({ ...r, mode: 'select', playing: false }))}>Chọn lại</button>
+            <button onClick={() => setReplay((r) => ({ ...r, mode: 'off', playing: false }))} title="Thoát replay">✕</button>
+          </div>
+        ) : (
+          <div className="ranges">{RANGES.map((r) => <button key={r.k} className={rangeKey === r.k ? 'on' : ''} onClick={() => chooseRange(r.k)}>{r.k}</button>)}</div>
+        )}
+        <div className="foot-right">
+          <span className="muted">{bars.current.length} nến · giờ VN (UTC+7)</span>
+          <button onClick={screenshot} title="Chụp ảnh biểu đồ (PNG)">📷</button>
+          <button className={autoScale ? 'on' : ''} onClick={() => setAutoScale((v) => !v)} title="Tự co giãn thang giá">AUTO</button>
+          <button className={logScale ? 'on' : ''} onClick={() => setLogScale((v) => !v)} title="Thang giá logarit">LOG</button>
+        </div>
       </div>
+      </div>
+      {full && sideOpen && <SidePanel sym={sym} watch={watch} onPick={onPick} />}
       </div>
       {!full && ema.enabled && ema.showBt && <Backtest res={btRes} opts={bt} onChange={setBt} intraday={res !== '1D' && res !== '1W'} />}
       {!full && !isIndex && <div className="quick">
@@ -666,6 +806,26 @@ function PsPanel({ st, vn30 }: { st: any; vn30?: number }) {
       <div className="ps-row"><span>KL khớp</span><b>{n(st.totVol)}</b>{st.lastVol ? <small>+{n(st.lastVol)}</small> : null}</div>
       <div className="ps-row"><span>OI</span><b>{n(st.oi)}</b>{basis !== null && <small className={basis >= 0 ? 'c-up' : 'c-down'}>Basis {basis > 0 ? '+' : ''}{basis.toFixed(1)}</small>}</div>
       <div className="ps-row"><span>NN mua/bán</span><b>{n(st.fB)} / {n(st.fS)}</b></div>
+    </div>
+  );
+}
+
+/** Chú thích O/H/L/C của nến dưới con trỏ (hoặc nến cuối) */
+function OhlcLegend({ bar, res }: { bar?: Bar | null; res: string }) {
+  if (!bar) return null;
+  const up = bar.close >= bar.open, cls = up ? 'c-up' : 'c-down';
+  const f = (v: number) => (v >= 1000 ? v.toFixed(1) : v.toFixed(2));
+  const chg = bar.close - bar.open, pc = bar.open ? (chg / bar.open) * 100 : 0;
+  const d = new Date((bar.time + 7 * 3600) * 1000).toISOString();
+  const when = res === '1D' || res === '1W' ? d.slice(0, 10).split('-').reverse().join('/') : `${d.slice(8, 10)}/${d.slice(5, 7)} ${d.slice(11, 16)}`;
+  const vol = bar.volume >= 1e6 ? (bar.volume / 1e6).toFixed(2) + 'tr' : bar.volume >= 1e3 ? (bar.volume / 1e3).toFixed(1) + 'k' : String(bar.volume);
+  return (
+    <div className="ohlc-legend">
+      <span className="muted">{when}</span>
+      <span>O <b className={cls}>{f(bar.open)}</b></span><span>H <b className={cls}>{f(bar.high)}</b></span>
+      <span>L <b className={cls}>{f(bar.low)}</b></span><span>C <b className={cls}>{f(bar.close)}</b></span>
+      <b className={cls}>{chg >= 0 ? '+' : ''}{f(chg)} ({pc >= 0 ? '+' : ''}{pc.toFixed(2)}%)</b>
+      <span>KL <b>{vol}</b></span>
     </div>
   );
 }

@@ -82,6 +82,10 @@ app.get('/api/footprint', async (req, res) => {
     res.json(await ticks.footprint(String(req.query.symbol || '').toUpperCase(), tf));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+app.get('/api/trades', async (req, res) => {
+  try { res.json(await ticks.trades(String(req.query.symbol || '').toUpperCase(), Number(req.query.limit) || 100)); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 app.get('/api/indices', (_req, res) => res.json([...store.indices.values()]));
 app.get('/api/history', async (req, res) => {
   try { res.json(await getHistory(req.query)); }

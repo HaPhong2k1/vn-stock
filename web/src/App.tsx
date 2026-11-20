@@ -46,8 +46,8 @@ export default function App() {
   // Đăng ký realtime cho các mã của tab hiện tại + mã đang xem chi tiết
   useEffect(() => {
     const base = view === 'board' ? syms : [];
-    feed.subscribe([...base, 'VN30F1M', ...(pick ? [pick] : [])]); // VN30F1M luôn hiển thị trên thanh chỉ số
-  }, [syms, pick, view]);
+    feed.subscribe([...base, 'VN30F1M', ...(pick ? [pick] : []), ...(full ? watch : [])]); // biểu đồ toàn màn hình: giá danh mục ở bảng phụ // VN30F1M luôn hiển thị trên thanh chỉ số
+  }, [syms, pick, view, full, watch]);
 
   const toggleWatch = useCallback((s: string) => setWatch((w) => (w.includes(s) ? w.filter((x) => x !== s) : [...w, s])), []);
 
@@ -80,7 +80,7 @@ export default function App() {
         {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={openFull} onToggleWatch={toggleWatch} />}
         {view === 'screener' && <Screener watch={watchSet} onPick={setPick} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
         {view === 'alerts' && <Alerts initialSym={alertSym} onPick={setPick} />}
-        {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} onPick={setPick} />}
+        {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} onPick={setPick} watch={watch} />}
       </main>
       <StatusBar />
       <Toasts />

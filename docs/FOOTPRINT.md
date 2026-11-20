@@ -90,8 +90,9 @@ Bài viết khuyên chọn thị trường **thanh khoản cao** (mã ít giao d
 - **ATO/ATC** là khớp định kỳ, không có bên chủ động (hiển thị riêng `ĐK`).
 - **Dữ liệu trên web này:**
   - Cổ phiếu: từng lệnh khớp thật kèm chiều mua/bán chủ động từ VPS ⇒ chính xác.
-  - **VN30F: ƯỚC LƯỢNG** — VPS không cung cấp danh sách lệnh khớp phái sinh; hệ thống thu thập realtime (socket +
-    snapshot 2 giây) và suy chiều theo giá chào. Chỉ có dữ liệu từ lúc server chạy trong phiên.
+  - **VN30F:** socket VPS gửi từng lệnh khớp phái sinh kèm chiều mua/bán chủ động ⇒ chính xác. Chỉ khi mất kết nối
+    mới ước lượng từ snapshot 2 giây (suy chiều theo giá chào; tỷ lệ % ước lượng hiện trên biểu đồ). VPS không có danh sách
+    lệnh khớp phái sinh trong quá khứ ⇒ chỉ có dữ liệu từ lúc server chạy trong phiên.
   - **Khung Ngày:** VPS chỉ cho dữ liệu phiên gần nhất ⇒ lịch sử footprint ngày được **lưu dần mỗi phiên** (sau 15:05,
     cho VN30, HNX30, top 100 thanh khoản và các mã đã xem). Cần `DATABASE_URL` để không mất khi server khởi động lại.
 - Kết quả quá khứ không đảm bảo tương lai; luôn đặt cắt lỗ.

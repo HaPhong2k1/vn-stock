@@ -235,3 +235,22 @@ main.wide .chart { height: 480px; }
 .ind-row .muted { font-size: 11px; }
 .reset-btn { margin-left: auto; }
 @media (max-width: 700px) { .ind-row { grid-template-columns: 20px 1fr; } .ind-row .muted { grid-column: 2; } }
+
+/* ---- Bảng dư mua/bán phái sinh (góc phải trên biểu đồ) ---- */
+.ps-panel { position: absolute; top: 6px; right: 70px; z-index: 6; width: 210px; padding: 6px 8px; border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  font-size: 11px; font-variant-numeric: tabular-nums; backdrop-filter: blur(2px); }
+.ps-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.ps-head button { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 0 4px; font-size: 14px; line-height: 1; }
+.ps-tot { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-radius: 4px; }
+.ps-tot div { display: flex; flex-direction: column; }
+.ps-tot span, .ps-row span { color: var(--muted); }
+.ps-tot b { font-size: 16px; }
+.ps-tot div:last-child { text-align: right; }
+.ps-bar { height: 5px; background: var(--down); border-radius: 3px; overflow: hidden; margin: 5px 0; }
+.ps-bar i { display: block; height: 100%; background: var(--up); transition: width .3s; }
+.ps-row { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; }
+.ps-row b { margin-left: auto; }
+.ps-row small { color: var(--muted); min-width: 0; }
+.ps-panel-min { position: absolute; top: 6px; right: 70px; z-index: 6; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 4px; padding: 2px 8px; font-size: 11px; }
+@media (max-width: 700px) { .ps-panel { right: 62px; width: 170px; } .ps-tot b { font-size: 13px; } }

@@ -41,13 +41,16 @@ Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localho
 Nút **👣 Footprint** trong khung biểu đồ: KL bán/mua chủ động theo từng mức giá, delta, POC, imbalance chéo (300%),
 stacked imbalance, unfinished auction, exhaustion, absorption, phân kỳ delta, tab **Delta & CVD**.
 - Cổ phiếu: dữ liệu từng lệnh khớp thật (VPS, có chiều chủ động) — khung phút & **Ngày**.
-- VN30F1M: khung 1/5/15 phút & **Ngày**, dữ liệu **ước lượng** từ luồng realtime (VPS không có lệnh khớp phái sinh).
+- VN30F1M: khung 1/5/15 phút & **Ngày**. Lệnh khớp phái sinh lấy realtime từ socket VPS (có chiều B/S) ⇒ chính xác;
+  chỉ các khoảng mất kết nối mới được ước lượng từ snapshot (tỷ lệ ước lượng hiện trên biểu đồ). Không có lịch sử trước khi server chạy.
 - Lịch sử khung ngày được lưu mỗi phiên sau 15:05 (`FP_TOP` mã thanh khoản cao nhất, mặc định 100) — cần `DATABASE_URL`.
 - Hướng dẫn thực chiến: [docs/FOOTPRINT.md](docs/FOOTPRINT.md). API: `GET /api/footprint?symbol=VN30F1M&tf=300` (tf: 60/300/900/1800/3600/86400).
 
 ## Phái sinh VN30F
 Tab **Phái sinh**: VN30F1M, VN30F2M, VN30F1Q, VN30F2Q (tự ánh xạ sang mã HĐ KRX, VD `41I1GB000`, và tự chuyển kỳ hạn khi đáo hạn).
-Thẻ VN30F1M trên thanh chỉ số hiển thị giá, KL, OI và basis so với VN30. Giá theo điểm, KL theo hợp đồng
+Thẻ VN30F1M trên thanh chỉ số hiển thị giá, KL, OI và basis so với VN30.
+Trên biểu đồ phái sinh, góc phải trên có bảng **Tổng dư mua / Tổng dư bán** realtime (socket VPS `boardps`), chênh lệch,
+tỷ lệ mua/bán, KL khớp, OI, basis, NN mua/bán (bấm – để thu gọn). Giá theo điểm, KL theo hợp đồng
 (giá trị = điểm × 100.000đ). Dữ liệu: socket VPS + snapshot REST 2 giây/lần trong phiên 8:45–14:45 làm dự phòng.
 
 ## Tính năng phân tích

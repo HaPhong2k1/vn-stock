@@ -150,13 +150,15 @@ export class TickCollector {
     const side = x.side === 'B' ? 1 : x.side === 'S' ? -1 : x.side === '' ? 0 : null;
     if (side === null) return; // không có chiều => để cơ chế ước lượng xử lý
     this.add(e, x.time ? toEpoch(this.session, x.time) : Math.floor(Date.now() / 1000), p, v, side, false);
-    e.lastTot = tot;
+    e.lastTot = tot; e.lastExactAt = Date.now();
   }
 
   /** Ước lượng từ chênh lệch tổng KL giữa 2 lần cập nhật (VN30F / khi không có tick có chiều) */
   onStockEvent(st) {
     const e = this.syms.get(st.s);
     if (!e) return;
+    // Đang nhận lệnh khớp chính xác từ socket => không ước lượng, không đẩy lastTot (tránh bỏ sót lệnh đến sau snapshot)
+    if (Date.now() - (e.lastExactAt || 0) < 15_000) { e.prevBid = st.b?.[0]?.[0]; e.prevAsk = st.a?.[0]?.[0]; return; }
     if (st.totVol > e.lastTot && st.last > 0 && e.lastTot > 0) {
       const v = st.totVol - e.lastTot, p = st.last;
       let side;

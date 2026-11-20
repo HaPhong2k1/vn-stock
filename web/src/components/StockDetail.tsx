@@ -578,6 +578,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         <canvas ref={overlay} className="overlay" />
         <canvas ref={drawCv} className={`draw-layer${tool !== 'cursor' ? ' active' : ''}${tool === 'eraser' ? ' eraser' : ''}`}
           onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} />
+        {st?.ex === 'PS' && <PsPanel st={st} vn30={g.indices.get('11')?.value} />}
         {tool !== 'cursor' && <div className="draw-hint">{TOOLS.find((t) => t.id === tool)?.name} — {tool === 'eraser' ? 'bấm vào hình cần xoá' : TOOLS.find((t) => t.id === tool)!.pts === 2 ? 'bấm 2 điểm (hoặc kéo-thả)' : 'bấm 1 điểm'} · Esc để huỷ</div>}
         {err && <div className="err">Không tải được biểu đồ: {err}</div>}
       </div>
@@ -631,6 +632,40 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick }
         onToggle={(id) => setInds((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]))} onOsc={setOsc}
         onReset={resetIndicators} onClose={() => setIndOpen(false)} />}
       {search !== null && <SymbolSearch initial={search} onClose={() => setSearch(null)} onSelect={(x) => { setSearch(null); if (x !== sym) onPick(x); }} />}
+    </div>
+  );
+}
+
+/** Khung số liệu phái sinh (góc phải trên biểu đồ): tổng dư mua/bán realtime, chênh lệch, KL khớp, OI, basis */
+function PsPanel({ st, vn30 }: { st: any; vn30?: number }) {
+  const [hide, setHide] = useState(() => { try { return localStorage.getItem('psPanel') === '0'; } catch { return false; } });
+  const toggle = () => { setHide(!hide); try { localStorage.setItem('psPanel', hide ? '1' : '0'); } catch { /* */ } };
+  const flash = useRef<HTMLDivElement>(null);
+  const prev = useRef<string>('');
+  const key = `${st.totBid}|${st.totAsk}`;
+  useEffect(() => {
+    if (prev.current && prev.current !== key && flash.current) { flash.current.classList.remove('flash'); void flash.current.offsetWidth; flash.current.classList.add('flash'); }
+    prev.current = key;
+  }, [key]);
+  if (hide) return <button className="ps-panel-min" onClick={toggle} title="Hiện bảng dư mua/bán">Dư M/B ▸</button>;
+  const tb = st.totBid || 0, ta = st.totAsk || 0, sum = tb + ta;
+  const pb = sum ? (tb / sum) * 100 : 50;
+  const diff = tb - ta;
+  const px = st.last || st.ref;
+  const basis = vn30 ? px - vn30 : null;
+  const n = (v?: number) => (v === undefined || v === null ? '—' : Math.round(v).toLocaleString('vi-VN'));
+  return (
+    <div className="ps-panel" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="ps-head"><b>{st.s}</b><span className="muted">{st.code}</span><button onClick={toggle} title="Thu gọn">–</button></div>
+      <div className="ps-tot" ref={flash}>
+        <div><span>Tổng dư mua</span><b className="c-up">{n(tb)}</b></div>
+        <div><span>Tổng dư bán</span><b className="c-down">{n(ta)}</b></div>
+      </div>
+      <div className="ps-bar" title={`Mua ${pb.toFixed(0)}% · Bán ${(100 - pb).toFixed(0)}%`}><i style={{ width: `${pb}%` }} /></div>
+      <div className="ps-row"><span>Chênh lệch</span><b className={diff >= 0 ? 'c-up' : 'c-down'}>{diff > 0 ? '+' : ''}{n(diff)}</b><small>{pb.toFixed(0)}% / {(100 - pb).toFixed(0)}%</small></div>
+      <div className="ps-row"><span>KL khớp</span><b>{n(st.totVol)}</b>{st.lastVol ? <small>+{n(st.lastVol)}</small> : null}</div>
+      <div className="ps-row"><span>OI</span><b>{n(st.oi)}</b>{basis !== null && <small className={basis >= 0 ? 'c-up' : 'c-down'}>Basis {basis > 0 ? '+' : ''}{basis.toFixed(1)}</small>}</div>
+      <div className="ps-row"><span>NN mua/bán</span><b>{n(st.fB)} / {n(st.fS)}</b></div>
     </div>
   );
 }

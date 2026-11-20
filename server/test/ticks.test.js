@@ -57,3 +57,16 @@ test('Không đếm trùng khi socket gửi tick có chiều rồi snapshot cậ
   assert.equal(vol, 7);
   assert.equal(fp.estimatedPct, 0);
 });
+
+test('Đang có lệnh khớp chính xác từ socket: snapshot đi trước không gây đếm ước lượng hay mất lệnh', async () => {
+  const { store, tc } = setup();
+  await tc.pin(['VN30F1M']);
+  tc.onTrade('VN30F1M', { lastPrice: 1851, lastVol: 7, totalVol: 1007, side: 'B', time: '10:00:00' }, 1);
+  tick(store, { last: 1851.2, totVol: 1020 });                       // snapshot đến trước
+  tc.onTrade('VN30F1M', { lastPrice: 1851.2, lastVol: 13, totalVol: 1020, side: 'S', time: '10:00:01' }, 1); // lệnh tương ứng đến sau
+  const fp = await tc.footprint('VN30F1M', 60);
+  const rows = fp.bars.flatMap((b) => b.rows);
+  assert.equal(rows.reduce((a, r) => a + r[1] + r[2], 0), 20);
+  assert.deepEqual(rows.find((r) => r[0] === 1851.2), [1851.2, 13, 0]);
+  assert.equal(fp.estimatedPct, 0);
+});

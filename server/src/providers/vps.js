@@ -47,6 +47,12 @@ export function normalizeVps(x, m = x?.marketId === 'DVX' ? 1 : config.volMult) 
   const room = num(x.fRoom); if (room !== undefined) p.room = room; // room NN tính theo cổ phiếu
   if (x.time) p.t = String(x.time);
   const oi = num(x.oi); if (oi !== undefined && m === 1) p.oi = oi; // khối lượng mở (phái sinh)
+  // Tổng dư mua / tổng dư bán (phái sinh): socket boardps id 3310 (BVolume/SVolume) hoặc snapshot g7 = "mua|bán|màu"
+  if (x.BVolume !== undefined) { p.totBid = num(x.BVolume); p.totAsk = num(x.SVolume); }
+  else if (m === 1 && typeof x.g7 === 'string') {
+    const [tb, ta] = x.g7.split('|').map(Number);
+    if (Number.isFinite(tb) && Number.isFinite(ta) && (tb || ta)) { p.totBid = tb; p.totAsk = ta; }
+  }
 
   // Snapshot: g1-g3 = dư mua (tốt nhất trước), g4-g6 = dư bán
   if (!x.side && x.g4 !== undefined) {
@@ -157,7 +163,7 @@ export class VpsProvider {
   applyDeriv(x) {
     const alias = this.derivAlias?.get(x?.sym);
     if (!alias) return false;
-    this.ticks?.onTrade(alias, x, 1);
+    if (Number(x.id) === 3220) this.ticks?.onTrade(alias, x, 1); // chỉ message khớp lệnh từng giao dịch
     const patch = normalizeVps(x, 1);
     const cur = this.store.stocks.get(alias);
     if (cur && patch.totVol !== undefined && patch.totVol < cur.totVol) return true; // dữ liệu cũ hơn
@@ -217,7 +223,7 @@ export class VpsProvider {
       if (!x?.sym) return;
       this.status.lastMsgAt = Date.now();
       if (this.applyDeriv({ ...x, marketId: 'DVX' })) return; // phái sinh: KL theo hợp đồng
-      if (x.lastVol !== undefined && x.lastPrice !== undefined) this.ticks?.onTrade(x.sym, x, config.volMult); // lệnh khớp từng giao dịch
+      if (Number(x.id) === 3220) this.ticks?.onTrade(x.sym, x, config.volMult); // lệnh khớp từng giao dịch (có chiều B/S)
       this.store.patchStock(x.sym, normalizeVps(x));
     };
     s.on('stock', onStock);

@@ -33,9 +33,18 @@ Phát triển: `npm run dev:server` + `npm run dev:web` (Vite ở http://localho
 - **ƒx Chỉ báo**: hộp tìm kiếm chỉ báo. Trên giá: MA6/10/20/50/200, EMA 9/21/50/200, Bollinger, VWAP, SuperTrend,
   Parabolic SAR, Ichimoku, Donchian, Keltner, SMC, Footprint, EMA cross. Khung dưới: RSI, MACD, Stochastic, Stoch RSI,
   ADX/DMI, CCI, ATR, Williams %R, OBV, MFI, Delta & CVD. Nút *Khôi phục mặc định*.
-- **Thanh công cụ vẽ** (bên trái): đường xu hướng, tia, đường ngang/dọc, hình chữ nhật, Fibonacci thoái lui, đo giá,
-  văn bản, tẩy, nam châm (bắt dính OHLC), giữ công cụ, ẩn/hiện, hoàn tác (Ctrl+Z), xoá tất cả. Hình vẽ lưu theo mã trên trình duyệt.
-  Bấm chọn hình rồi nhấn Delete để xoá; Esc để huỷ.
+- **Thanh công cụ vẽ** (bên trái, chia nhóm, bấm › để mở danh sách, ★ để ghim): ~50 công cụ
+  - Đường: xu hướng, tia, kéo dài, đường thông tin, góc, ngang, tia ngang, dọc, chữ thập, mũi tên
+  - Kênh: song song, hồi quy tuyến tính (±2σ), Pitchfork Andrews/Schiff
+  - Fibonacci & Gann: thoái lui, mở rộng theo xu hướng, kênh, vùng thời gian, quạt, thời gian theo xu hướng, vòng tròn,
+    xoắn ốc, cung, cái nêm, Pitchfan, hộp Gann, Gann cố định, Gann vuông, quạt Gann
+  - Mô hình: XABCD, ABCD, tam giác, vai-đầu-vai, sóng Elliott 5 sóng / ABC / tam giác
+  - Dự báo & đo lường: vị thế Mua/Bán (mục tiêu, dừng lỗ, R:R), đo giá, đo thời gian, đo giá & thời gian
+  - Hình học: chữ nhật, tròn, elip, tam giác, đường gấp khúc, bút vẽ, bút dạ quang; Chú thích: văn bản, chú thích có mũi tên,
+    nhãn giá, mũi tên tăng/giảm, cờ; Biểu tượng cảm xúc; Phóng to vùng; Tẩy
+  - **Chỉnh sửa:** bấm chọn hình → kéo để di chuyển, kéo điểm neo để chỉnh; thanh sửa nổi: màu, độ dày, kiểu nét, tô nền,
+    kéo dài trái/phải, nội dung chữ, khoá, nhân bản, xoá. Nhấp đúp vào chữ để sửa. Delete xoá, Ctrl+Z hoàn tác, Esc huỷ.
+  - Nam châm (bắt dính OHLC), giữ chế độ vẽ, khoá tất cả, ẩn/hiện, xoá tất cả. Hình vẽ lưu theo mã trên trình duyệt.
 - **Kiểu biểu đồ:** Nến, Heikin Ashi, Thanh OHLC, Đường, Vùng. **Chú thích O/H/L/C/KL** theo con trỏ.
 - **Thanh dưới:** chọn nhanh 1N · 5N · 1T · 3T · 6T · YTD · 1 năm · Tất cả (tự đổi khung phù hợp), 📷 chụp ảnh PNG, AUTO / LOG.
 - **⏪ Replay:** chọn 1 nến, các nến sau bị ẩn; phát 1–10x, tiến/lùi từng nến — luyện giao dịch như TradingView.

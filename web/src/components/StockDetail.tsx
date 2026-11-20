@@ -13,9 +13,9 @@ import { SymbolSearch } from './SymbolSearch';
 import { useGlobal } from '../lib/hooks';
 import { INDICATORS, IND_BY_ID, type IndResult } from '../lib/indicatorDefs';
 import { IndicatorDialog, type BuiltIn } from './IndicatorDialog';
-import { DrawToolbar } from './DrawToolbar';
+import { DrawToolbar, DrawEditBar } from './DrawToolbar';
 import { SidePanel } from './SidePanel';
-import { TimeMap, drawShape, hitTest, loadDrawings, saveDrawings, TOOLS, type Drawing, type Pt, type Tool } from '../lib/drawings';
+import { TimeMap, renderDrawing, hitDrawing, dragHandle, moveDrawing, makeDrawing, toolName, toolPts, hasText, canFill, canExtend, loadDrawings, saveDrawings, type DCtx, type Drawing, type Pt, type Tool } from '../lib/drawings';
 
 const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
 const saveLS = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bỏ qua */ } };
@@ -125,6 +125,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   const [magnet, setMagnet] = useState(false);
   const [keepTool, setKeepTool] = useState(false);
   const [hideDraw, setHideDraw] = useState(false);
+  const [lockAll, setLockAll] = useState(false);
   const [drawings, setDrawingsRaw] = useState<Drawing[]>(() => loadDrawings(sym));
   // Lịch sử để hoàn tác (Ctrl+Z) mọi thao tác: vẽ, tẩy, xoá
   const drawHist = useRef<Drawing[][]>([]);
@@ -136,7 +137,10 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   const undoDraw = useCallback(() => { const prev = drawHist.current.pop(); if (prev) setDrawingsRaw(prev); }, []);
   useEffect(() => saveDrawings(sym, drawings), [sym, drawings]);
   const [selId, setSelId] = useState<string | null>(null);
-  const pendingDraw = useRef<{ type: Drawing['type']; p1: Pt; p2: Pt } | null>(null);
+  // đang vẽ dở: các điểm đã bấm + điểm theo con trỏ
+  const pendingDraw = useRef<{ tool: string; pts: Pt[]; cur: Pt | null; downX?: number; downY?: number } | null>(null);
+  const zoomBox = useRef<{ x0: number; x1: number } | null>(null);
+  const hoverRef = useRef<string | null>(null);
   const drawCv = useRef<HTMLCanvasElement>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -165,9 +169,15 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   const fpZoomed = useRef(false);
   const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType });
   opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType };
-  const drawRef = useRef({ drawings, hideDraw, selId, tool });
-  drawRef.current = { drawings, hideDraw, selId, tool };
+  const drawRef = useRef({ drawings, hideDraw, selId, tool, lockAll, magnet, keepTool, drawColor });
+  drawRef.current = { drawings, hideDraw, selId, tool, lockAll, magnet, keepTool, drawColor };
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  /** Ngữ cảnh toạ độ cho công cụ vẽ */
+  const mkCtx = (): DCtx | null => {
+    const x = s.current, cv = drawCv.current;
+    if (!x.chart || !cv) return null;
+    return { chart: x.chart, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w: x.chart.timeScale().width(), h: cv.parentElement!.clientHeight - x.chart.timeScale().height(), closes: bars.current.map((b) => b.close), dark };
+  };
   const redraw = useCallback(() => {
     const x = s.current;
     if (!overlay.current || !x.chart) return;
@@ -183,12 +193,17 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
       const ctx = cv.getContext('2d')!;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
       const { drawings, hideDraw, selId } = drawRef.current;
-      const c = { chart: x.chart, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w, h };
-      if (!hideDraw) for (const dr of drawings) drawShape(ctx, c, dr, dark, dr.id === selId);
+      const c = mkCtx();
+      if (c && !hideDraw) for (const dr of drawings) if (!dr.hidden) renderDrawing(ctx, dr, c, dr.id === selId, dr.id === hoverRef.current);
       const pd = pendingDraw.current;
-      if (pd) drawShape(ctx, c, { id: 'pending', type: pd.type, pts: pd.type === 'hline' || pd.type === 'vline' || pd.type === 'text' ? [pd.p1] : [pd.p1, pd.p2], color: drawColor }, dark, true);
+      if (c && pd && pd.tool !== 'eraser' && pd.tool !== 'zoom') {
+        const pts = pd.cur ? [...pd.pts, pd.cur] : pd.pts;
+        if (pts.length) renderDrawing(ctx, { ...makeDrawing(pd.tool, pts, drawRef.current.drawColor, c), id: 'pending' }, c, true);
+      }
+      const zb = zoomBox.current;
+      if (zb) { ctx.fillStyle = 'rgba(41,98,255,0.15)'; ctx.fillRect(Math.min(zb.x0, zb.x1), 0, Math.abs(zb.x1 - zb.x0), h); ctx.strokeStyle = '#2962ff'; ctx.strokeRect(Math.min(zb.x0, zb.x1), 0, Math.abs(zb.x1 - zb.x0), h); }
     }
-  }, [dark, drawColor]);
+  }, [dark]);
 
   // Tạo 2 biểu đồ: giá (+MA/BB/khối lượng) và dao động (RSI/MACD), đồng bộ trục thời gian
   useEffect(() => {
@@ -244,10 +259,6 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         setReplay((r) => ({ ...r, mode: 'on', idx, playing: false }));
         return;
       }
-      if (drawRef.current.tool !== 'cursor' || !param.point) return;
-      const w = c.timeScale().width(), h = el.current!.clientHeight - c.timeScale().height();
-      const hit = hitTest({ chart: c, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w, h }, drawRef.current.drawings, param.point.x, param.point.y);
-      setSelId(hit ? hit.id : null);
     });
     // Vẽ lại lớp SMC khi cuộn/zoom/đổi kích thước/kéo thang giá
     let raf = 0;
@@ -446,8 +457,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
       if (e.altKey && e.key.toLowerCase() === 'r') { e.preventDefault(); resetView(); }
       else if (e.key === 'Escape' && replayRef.current.mode !== 'off') { e.preventDefault(); setReplay((r) => ({ ...r, mode: 'off', playing: false })); }
+      else if (e.key === 'Enter' && pendingDraw.current && toolPts(pendingDraw.current.tool) === 'multi') { e.preventDefault(); finishMulti(); }
       else if (e.key === 'Escape' && (pendingDraw.current || drawRef.current.tool !== 'cursor' || drawRef.current.selId)) {
-        e.preventDefault(); pendingDraw.current = null; setTool('cursor'); setSelId(null); redrawRef.current();
+        e.preventDefault(); pendingDraw.current = null; zoomBox.current = null; setTool('cursor'); setSelId(null); redrawRef.current();
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawRef.current.selId) {
         e.preventDefault(); const id = drawRef.current.selId; setDrawings((d) => d.filter((x) => x.id !== id)); setSelId(null);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoDraw(); }
@@ -456,54 +468,146 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     return () => removeEventListener('keydown', k, true);
   }, [resetView, undoDraw, setDrawings]);
 
-  // ---- Vẽ bằng chuột trên lớp canvas (chỉ nhận chuột khi đang chọn công cụ vẽ)
-  const toPt = useCallback((e: React.PointerEvent): Pt | null => {
-    const x = s.current, cv = drawCv.current; if (!x.chart || !cv) return null;
-    const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  // ======================= CÔNG CỤ VẼ =======================
+  /** Toạ độ màn hình -> (thời gian, giá); nam châm bắt dính OHLC */
+  const toPt = useCallback((clientX: number, clientY: number, snap = drawRef.current.magnet): Pt | null => {
+    const x = s.current, box = el.current; if (!x.chart || !box) return null;
+    const r = box.getBoundingClientRect(), px = clientX - r.left, py = clientY - r.top;
     const li = x.chart.timeScale().coordinateToLogical(px), pr = x.candle.coordinateToPrice(py);
     if (li === null || pr === null) return null;
     const tm = new TimeMap(bars.current.map((b) => b.time));
     const idx = Math.round(li as number);
     let price = pr as number;
     const bar = bars.current[idx];
-    if (magnet && bar) price = [bar.open, bar.high, bar.low, bar.close].reduce((a, v) => (Math.abs(v - price) < Math.abs(a - price) ? v : a));
+    if (snap && bar) price = [bar.open, bar.high, bar.low, bar.close].reduce((a, v) => (Math.abs(v - price) < Math.abs(a - price) ? v : a));
     return { t: tm.toTime(idx), p: +price.toFixed(4) };
-  }, [magnet]);
-  const finish = (d: Drawing) => { setDrawings((list) => [...list, d]); setSelId(d.id); pendingDraw.current = null; if (!keepTool) setTool('cursor'); };
+  }, []);
+  const finish = useCallback((d: Drawing) => {
+    if (hasText(d.type) && d.type !== 'emoji' && !d.text) {
+      const txt = prompt('Nội dung:', d.type === 'text' ? 'Ghi chú' : '');
+      if (txt === null) { pendingDraw.current = null; redrawRef.current(); return; }
+      d.text = txt;
+    }
+    setDrawings((list) => [...list, d]); setSelId(d.id); pendingDraw.current = null;
+    if (!drawRef.current.keepTool) setTool('cursor');
+  }, [setDrawings]);
+  const finishMulti = useCallback(() => {
+    const pd = pendingDraw.current, c = mkCtx();
+    if (pd && c && pd.pts.length >= 2) finish(makeDrawing(pd.tool, pd.pts, drawRef.current.drawColor, c));
+    else { pendingDraw.current = null; redrawRef.current(); }
+  }, [finish]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Lớp vẽ (khi đang chọn công cụ): bấm điểm / kéo-thả / vẽ tự do / phóng to vùng / tẩy
   const onDrawDown = (e: React.PointerEvent) => {
     e.preventDefault();
-    const pt = toPt(e); if (!pt) return;
-    if (tool === 'eraser') {
-      const x = s.current, cv = drawCv.current!; const r = cv.getBoundingClientRect();
-      const hit = hitTest({ chart: x.chart, series: x.candle, tm: new TimeMap(bars.current.map((b) => b.time)), w: cv.clientWidth, h: cv.clientHeight }, drawings, e.clientX - r.left, e.clientY - r.top);
-      if (hit) setDrawings((d) => d.filter((q) => q.id !== hit.id));
-      return;
-    }
-    const def = TOOLS.find((t) => t.id === tool)!;
-    const id = Math.random().toString(36).slice(2);
-    const type = tool as Drawing['type'];
-    if (def.pts === 1) {
-      if (type === 'text') { const txt = prompt('Nội dung ghi chú:'); if (txt) finish({ id, type, pts: [pt], color: drawColor, text: txt }); else setTool('cursor'); return; }
-      finish({ id, type, pts: [pt], color: drawColor }); return;
-    }
+    const c = mkCtx(); const pt = toPt(e.clientX, e.clientY); if (!c || !pt) return;
+    const r = el.current!.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    if (tool === 'eraser') { const hit = hitDrawing(drawings, px, py, c); if (hit) setDrawings((d) => d.filter((q) => q.id !== hit.d.id)); return; }
+    if (tool === 'zoom') { zoomBox.current = { x0: px, x1: px }; (e.target as HTMLElement).setPointerCapture(e.pointerId); return; }
+    const need = toolPts(tool);
     const pd = pendingDraw.current;
-    if (!pd) { pendingDraw.current = { type, p1: pt, p2: pt }; (e.target as HTMLElement).setPointerCapture(e.pointerId); }
-    else finish({ id, type: pd.type, pts: [pd.p1, pt], color: drawColor });
+    if (need === 'free') { pendingDraw.current = { tool, pts: [pt], cur: null }; (e.target as HTMLElement).setPointerCapture(e.pointerId); return; }
+    if (need === 1) { finish(makeDrawing(tool, [pt], drawColor, c)); return; }
+    if (!pd) { pendingDraw.current = { tool, pts: [pt], cur: pt, downX: px, downY: py }; (e.target as HTMLElement).setPointerCapture(e.pointerId); redrawRef.current(); return; }
+    pd.pts.push(pt);
+    if (typeof need === 'number' && pd.pts.length >= need) finish(makeDrawing(tool, pd.pts.slice(0, need), drawColor, c));
+    else redrawRef.current();
   };
   const onDrawMove = (e: React.PointerEvent) => {
+    const r = el.current!.getBoundingClientRect();
+    if (zoomBox.current) { zoomBox.current.x1 = e.clientX - r.left; redrawRef.current(); return; }
     const pd = pendingDraw.current; if (!pd) return;
-    const pt = toPt(e); if (pt) { pd.p2 = pt; redrawRef.current(); }
+    const pt = toPt(e.clientX, e.clientY); if (!pt) return;
+    if (toolPts(pd.tool) === 'free') {
+      const last = pd.pts[pd.pts.length - 1], c = mkCtx()!;
+      const dx = (c.chart.timeScale().logicalToCoordinate(c.tm.toIndex(pt.t) as any) ?? 0) - (c.chart.timeScale().logicalToCoordinate(c.tm.toIndex(last.t) as any) ?? 0);
+      const dy = (c.series.priceToCoordinate(pt.p) ?? 0) - (c.series.priceToCoordinate(last.p) ?? 0);
+      if (Math.hypot(dx, dy) >= 3 || pt.t !== last.t) pd.pts.push(toPt(e.clientX, e.clientY, false)!);
+    } else pd.cur = pt;
+    redrawRef.current();
   };
   const onDrawUp = (e: React.PointerEvent) => {
+    const c = mkCtx(); if (!c) return;
+    if (zoomBox.current) {
+      const zb = zoomBox.current; zoomBox.current = null;
+      if (Math.abs(zb.x1 - zb.x0) > 8) {
+        const ts = c.chart.timeScale(), a = ts.coordinateToLogical(Math.min(zb.x0, zb.x1)), b = ts.coordinateToLogical(Math.max(zb.x0, zb.x1));
+        if (a !== null && b !== null) { ts.setVisibleLogicalRange({ from: a, to: b }); s.current.chart2.timeScale().setVisibleLogicalRange({ from: a, to: b }); }
+      }
+      if (!drawRef.current.keepTool) setTool('cursor');
+      redrawRef.current(); return;
+    }
     const pd = pendingDraw.current; if (!pd) return;
-    // kéo-thả: nhả chuột xa điểm đầu => hoàn tất; bấm-nhả tại chỗ => chờ cú bấm thứ 2
-    const x = s.current;
-    const a = x.chart.timeScale().logicalToCoordinate(new TimeMap(bars.current.map((b) => b.time)).toIndex(pd.p1.t) as any) ?? 0;
-    const r = drawCv.current!.getBoundingClientRect();
-    if (Math.abs(e.clientX - r.left - a) > 6 || Math.abs((x.candle.priceToCoordinate(pd.p1.p) ?? 0) - (e.clientY - r.top)) > 6) {
-      finish({ id: Math.random().toString(36).slice(2), type: pd.type, pts: [pd.p1, pd.p2], color: drawColor });
+    const need = toolPts(pd.tool);
+    if (need === 'free') { if (pd.pts.length >= 2) finish(makeDrawing(pd.tool, pd.pts, drawColor, c)); else { pendingDraw.current = null; redrawRef.current(); } return; }
+    // kéo-thả công cụ 2 điểm: nhả chuột xa điểm đầu => hoàn tất ngay
+    const r = el.current!.getBoundingClientRect();
+    if (need === 2 && pd.pts.length === 1 && pd.cur && Math.hypot(e.clientX - r.left - (pd.downX ?? 0), e.clientY - r.top - (pd.downY ?? 0)) > 8) {
+      finish(makeDrawing(pd.tool, [pd.pts[0], pd.cur], drawColor, c));
     }
   };
+
+  // ---- Chế độ con trỏ: chọn, kéo di chuyển hình, kéo điểm neo, nhấp đúp sửa chữ
+  useEffect(() => {
+    const box = el.current; if (!box) return;
+    let drag: { id: string; handle: number; start: Pt; orig: Drawing; moved: boolean } | null = null;
+    let blockMouse = false;
+    const local = (e: { clientX: number; clientY: number }) => { const r = box.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    const hit = (e: { clientX: number; clientY: number }) => {
+      const st = drawRef.current, c = mkCtx();
+      if (!c || st.tool !== 'cursor' || st.hideDraw) return null;
+      const { x, y } = local(e);
+      if (x > c.w || y > c.h) return null;
+      return hitDrawing(st.drawings, x, y, c, st.selId);
+    };
+    // bỏ qua các nút/khung nổi nằm trên biểu đồ (thanh sửa hình, bảng dư mua/bán...)
+    const onUi = (e: Event) => !!(e.target as HTMLElement)?.closest?.('.draw-edit, .ps-panel, .ps-panel-min, button, select, input');
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0 || onUi(e)) return;
+      const h = hit(e);
+      if (!h) { if (drawRef.current.selId && drawRef.current.tool === 'cursor') setSelId(null); return; }
+      e.stopPropagation(); e.preventDefault(); blockMouse = true;
+      setSelId(h.d.id);
+      const start = toPt(e.clientX, e.clientY, false);
+      if (start && !h.d.locked && !drawRef.current.lockAll) drag = { id: h.d.id, handle: h.handle, start, orig: h.d, moved: false };
+    };
+    const blockIfDragging = (e: Event) => { if (blockMouse) { e.stopPropagation(); e.preventDefault(); } };
+    const move = (e: PointerEvent) => {
+      if (drag) {
+        const c = mkCtx(); const pt = toPt(e.clientX, e.clientY, drag.handle >= 0 ? drawRef.current.magnet : false); if (!c || !pt) return;
+        const nd = drag.handle >= 0 ? dragHandle(drag.orig, drag.handle, pt, c)
+          : moveDrawing(drag.orig, Math.round(c.tm.toIndex(pt.t) - c.tm.toIndex(drag.start.t)), pt.p - drag.start.p, c);
+        if (!drag.moved) { drag.moved = true; setDrawings((l) => l.map((d) => (d.id === nd.id ? nd : d))); }
+        else setDrawingsRaw((l) => l.map((d) => (d.id === nd.id ? nd : d)));
+        return;
+      }
+      if (e.buttons || onUi(e)) return;
+      const h = hit(e);
+      const id = h ? h.d.id : null;
+      box.style.cursor = h ? (h.handle >= 0 ? 'grab' : 'move') : '';
+      if (id !== hoverRef.current) { hoverRef.current = id; redrawRef.current(); }
+    };
+    const up = () => { drag = null; setTimeout(() => { blockMouse = false; }, 0); };
+    const dbl = (e: MouseEvent) => {
+      const h = hit(e); if (!h || !hasText(h.d.type)) return;
+      e.stopPropagation();
+      const txt = prompt('Nội dung:', h.d.text || '');
+      if (txt !== null) setDrawings((l) => l.map((d) => (d.id === h.d.id ? { ...d, text: txt } : d)));
+    };
+    box.addEventListener('pointerdown', down, true);
+    box.addEventListener('mousedown', blockIfDragging, true);
+    box.addEventListener('touchstart', blockIfDragging, true);
+    box.addEventListener('dblclick', dbl, true);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      box.removeEventListener('pointerdown', down, true); box.removeEventListener('mousedown', blockIfDragging, true);
+      box.removeEventListener('touchstart', blockIfDragging, true); box.removeEventListener('dblclick', dbl, true);
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+    };
+  }, [toPt, setDrawings]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selDrawing = drawings.find((d) => d.id === selId) || null;
+  const patchSel = (patch: Partial<Drawing>) => selId && setDrawings((l) => l.map((d) => (d.id === selId ? { ...d, ...patch } : d)));
 
   /** Khôi phục bộ chỉ báo mặc định */
   const resetIndicators = () => {
@@ -684,19 +788,27 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         </div>
       )}
       <div className="chart-area">
-      <DrawToolbar tool={tool} setTool={(t) => { pendingDraw.current = null; setTool(t); }} color={drawColor} setColor={setDrawColor}
+      <DrawToolbar tool={tool} setTool={(t) => { pendingDraw.current = null; setTool(t); if (t !== 'cursor') setSelId(null); }}
         magnet={magnet} setMagnet={setMagnet} keep={keepTool} setKeep={setKeepTool} hidden={hideDraw} setHidden={setHideDraw}
+        lockAll={lockAll} setLockAll={setLockAll}
         count={drawings.length} canUndo={drawHist.current.length > 0} onUndo={undoDraw}
         onClear={() => { if (confirm(`Xoá ${drawings.length} hình vẽ của ${sym}?`)) setDrawings(() => []); }} onReset={resetView} />
       <div className="charts">
       <div className="chart" ref={el}>
         <canvas ref={overlay} className="overlay" />
         <canvas ref={drawCv} className={`draw-layer${tool !== 'cursor' ? ' active' : ''}${tool === 'eraser' ? ' eraser' : ''}`}
-          onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} />
+          onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} onDoubleClick={() => toolPts(tool) === 'multi' && finishMulti()} />
+        {selDrawing && tool === 'cursor' && !hideDraw && (
+          <DrawEditBar d={selDrawing} onChange={(p) => { patchSel(p); if (p.color) setDrawColor(p.color); }} canFill={canFill(selDrawing.type)} canExtend={canExtend(selDrawing.type)} hasText={hasText(selDrawing.type)}
+            onDelete={() => { setDrawings((l) => l.filter((d) => d.id !== selDrawing.id)); setSelId(null); }}
+            onClone={() => { const c = mkCtx(); if (!c) return; const nd = { ...moveDrawing(selDrawing, 3, 0, c), id: Math.random().toString(36).slice(2), locked: false }; setDrawings((l) => [...l, nd]); setSelId(nd.id); }} />
+        )}
         {st?.ex === 'PS' && <PsPanel st={st} vn30={g.indices.get('11')?.value} />}
         <OhlcLegend bar={ohlc || bars.current[replay.mode === 'on' ? replay.idx : bars.current.length - 1]} res={res} />
         {replay.mode === 'select' && <div className="draw-hint">⏪ Bấm vào nến để bắt đầu replay từ đó — các nến sau sẽ bị ẩn · Esc/⏪ để huỷ</div>}
-        {tool !== 'cursor' && <div className="draw-hint">{TOOLS.find((t) => t.id === tool)?.name} — {tool === 'eraser' ? 'bấm vào hình cần xoá' : TOOLS.find((t) => t.id === tool)!.pts === 2 ? 'bấm 2 điểm (hoặc kéo-thả)' : 'bấm 1 điểm'} · Esc để huỷ</div>}
+        {tool !== 'cursor' && <div className="draw-hint">{toolName(tool)} — {tool === 'eraser' ? 'bấm vào hình cần xoá' : tool === 'zoom' ? 'kéo chọn khoảng thời gian cần phóng to'
+          : toolPts(tool) === 'multi' ? 'bấm từng điểm, nhấp đúp hoặc Enter để kết thúc' : toolPts(tool) === 'free' ? 'giữ chuột và vẽ' : toolPts(tool) === 1 ? 'bấm 1 điểm'
+          : toolPts(tool) === 2 ? 'bấm 2 điểm (hoặc kéo-thả)' : `bấm ${toolPts(tool)} điểm (${(pendingDraw.current?.pts.length || 0)}/${toolPts(tool)})`} · Esc để huỷ</div>}
         {err && <div className="err">Không tải được biểu đồ: {err}</div>}
       </div>
       <div className="res-tabs ind osc-bar">

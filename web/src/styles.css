@@ -302,3 +302,44 @@ table.mom th, table.mom td { padding: 3px 4px; text-align: right; border-bottom:
 table.mom th:first-child, table.mom td:first-child { text-align: left; }
 table.mom th { color: var(--muted); font-weight: 600; }
 @media (max-width: 900px) { .side-panel { display: none; } }
+
+/* ---- Thanh công cụ vẽ nhóm + menu xổ ra (kiểu TradingView/Fiant) ---- */
+.draw-bar { width: 44px; position: relative; overflow: visible; z-index: 30; }
+.draw-bar > button, .db-group > button:first-child { width: 34px; height: 32px; display: grid; place-items: center; }
+.db-group { position: relative; display: flex; align-items: center; }
+.db-group .db-more { position: absolute; right: -6px; top: 50%; transform: translateY(-50%); width: 10px !important; height: 18px !important; padding: 0; font-size: 11px !important; color: var(--muted) !important; opacity: 0; }
+.db-group:hover .db-more { opacity: 1; }
+.db-group > button.on, .draw-bar > button.on { background: color-mix(in srgb, var(--floor) 22%, transparent) !important; color: var(--floor) !important; }
+.db-fav { height: 28px !important; }
+.db-fly { position: absolute; left: 44px; width: 330px; max-height: 70vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.35); padding: 6px 0; z-index: 40; }
+.db-fly-h { padding: 6px 14px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+.db-item { display: grid; grid-template-columns: 24px 1fr 22px; gap: 10px; align-items: center; padding: 7px 14px; cursor: pointer; color: var(--text); }
+.db-item:hover { background: var(--head); }
+.db-item.on { color: var(--floor); }
+.db-star { border: 0; background: none; color: var(--line); font-size: 14px; padding: 0; }
+.db-item:hover .db-star { color: var(--muted); }
+.db-star.on, .db-item:hover .db-star.on { color: #f0b90b; }
+.db-emoji { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; padding: 6px 10px; }
+.db-emoji button { border: 0; background: none; font-size: 20px; border-radius: 6px; padding: 4px 0; }
+.db-emoji button:hover { background: var(--head); }
+/* Thanh sửa hình đang chọn */
+.draw-edit { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.3); font-size: 12px; white-space: nowrap; }
+.draw-edit .de-name { color: var(--muted); padding: 0 4px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.draw-edit button, .draw-edit select, .draw-edit input { border: 1px solid transparent; background: none; color: var(--text); border-radius: 4px; padding: 3px 6px; font: inherit; }
+.draw-edit select, .draw-edit input { border-color: var(--line); background: var(--bg); }
+.draw-edit input { width: 140px; }
+.draw-edit button:hover { background: var(--head); }
+.draw-edit button.on { background: color-mix(in srgb, var(--floor) 22%, transparent); color: var(--floor); }
+.de-color { position: relative; }
+.de-color i { display: block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); }
+.de-pal { position: absolute; top: 30px; left: 0; display: grid; grid-template-columns: repeat(5, 20px); gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; z-index: 9; }
+.de-pal button { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line) !important; padding: 0; }
+@media (max-width: 700px) { .draw-edit .de-name { display: none; } .db-fly { width: 260px; } }
+
+.draw-bar .db-star, .draw-bar .db-star:hover, .draw-bar .db-star.on { background: none !important; width: 22px !important; height: 22px !important; }
+.draw-bar .db-item { width: auto; }
+.draw-bar .db-emoji button { width: auto !important; height: auto !important; }
+.draw-bar .db-star { color: var(--muted) !important; }
+.draw-bar .db-star.on { color: #f0b90b !important; }

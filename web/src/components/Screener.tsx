@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Metrics } from '../lib/api';
 import { fmtBig } from '../lib/format';
+import { loadSymbols, fold } from './SymbolSearch';
 
 type Pred = (m: Metrics) => boolean;
 const PRESETS: { key: string; label: string; hint: string; test: Pred }[] = [
@@ -53,6 +54,10 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
   const [minValue, setMinValue] = useState(1);     // GTGD tối thiểu (tỷ) để lọc mã thanh khoản kém
   const [minAvgVol, setMinAvgVol] = useState(100_000);
   const [onlyWatch, setOnlyWatch] = useState(false);
+  // Tìm mã/tên công ty: khi có từ khoá thì tìm trong TOÀN BỘ mã (bỏ qua các bộ lọc) như ô tìm kiếm ở bảng giá
+  const [q, setQ] = useState('');
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => { loadSymbols().then((l) => setNames(new Map(l.map((x) => [x.s, fold(x.name)])))); }, []);
   const [sort, setSort] = useState<{ k: keyof Metrics; dir: 1 | -1 }>({ k: 'value', dir: -1 });
   const [err, setErr] = useState('');
 
@@ -64,8 +69,14 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
     return () => { dead = true; clearInterval(t); };
   }, []);
 
+  const fq = fold(q.trim());
   const rows = useMemo(() => {
     if (!data) return [];
+    if (fq) {
+      const hit = data.rows.filter((m) => m.s.includes(fq) || (names.get(m.s) || '').includes(fq));
+      // mã khớp chính xác / bắt đầu bằng từ khoá lên đầu
+      return hit.sort((a, b) => Number(b.s === fq) - Number(a.s === fq) || Number(b.s.startsWith(fq)) - Number(a.s.startsWith(fq)) || a.s.localeCompare(b.s));
+    }
     const preds = PRESETS.filter((p) => presets.includes(p.key)).map((p) => p.test);
     const out = data.rows.filter((m) =>
       (ex === 'ALL' || m.ex === ex) && m.value >= minValue && m.avgVol20 >= minAvgVol
@@ -76,7 +87,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
       if (x === null) return 1; if (y === null) return -1;
       return (x > y ? 1 : -1) * sort.dir;
     });
-  }, [data, presets, ex, minValue, minAvgVol, onlyWatch, watch, sort]);
+  }, [data, presets, ex, minValue, minAvgVol, onlyWatch, watch, sort, fq, names]);
 
   const toggle = (k: string) => setPresets((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
 
@@ -93,8 +104,11 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
           <label>GTGD hôm nay ≥ <input type="number" value={minValue} min={0} step={1} onChange={(e) => setMinValue(+e.target.value)} /> tỷ</label>
           <label>KL TB20 ≥ <input type="number" value={minAvgVol} min={0} step={50000} onChange={(e) => setMinAvgVol(+e.target.value)} /></label>
           <label><input type="checkbox" checked={onlyWatch} onChange={(e) => setOnlyWatch(e.target.checked)} /> Chỉ danh mục</label>
+          <input className="scr-search" placeholder="🔍 Tìm mã / tên công ty (Enter để mở biểu đồ)" value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && rows[0]) onPick(rows[0].s); if (e.key === 'Escape') setQ(''); }} />
+          {fq && <button className="link" onClick={() => setQ('')}>✕ Xoá tìm kiếm</button>}
           <span className="muted">
-            {data ? `${rows.length} / ${data.rows.length} mã · lịch sử đến ${data.asOf || '…'}` : 'Đang tải…'}
+            {fq && <b className="c-ref">Đang tìm “{q.trim()}” trong toàn bộ mã (bỏ qua bộ lọc) · </b>}{data ? `${rows.length} / ${data.rows.length} mã · lịch sử đến ${data.asOf || '…'}` : 'Đang tải…'}
             {data?.loading && ` · đang tải lịch sử ${data.progress.done}/${data.progress.total}`}
             {err && <span className="c-down"> · {err}</span>}
           </span>

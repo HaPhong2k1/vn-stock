@@ -343,3 +343,7 @@ table.mom th { color: var(--muted); font-weight: 600; }
 .draw-bar .db-emoji button { width: auto !important; height: auto !important; }
 .draw-bar .db-star { color: var(--muted) !important; }
 .draw-bar .db-star.on { color: #f0b90b !important; }
+
+.scr-search { padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; width: 280px; text-transform: uppercase; }
+.scr-search::placeholder { text-transform: none; }
+@media (max-width: 700px) { .scr-search { width: 100%; } }

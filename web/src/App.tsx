@@ -78,7 +78,7 @@ export default function App() {
       </nav>}
       <main className={pick ? `with-detail${wide ? ' wide' : ''}` : ''}>
         {view === 'board' && <PriceBoard syms={syms} watch={watchSet} onPick={openFull} onToggleWatch={toggleWatch} />}
-        {view === 'screener' && <Screener watch={watchSet} onPick={setPick} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
+        {view === 'screener' && <Screener watch={watchSet} onPick={openFull} onQuickAlert={(s) => { setAlertSym(s); setView('alerts'); }} />}
         {view === 'alerts' && <Alerts initialSym={alertSym} onPick={setPick} />}
         {pick && <StockDetail key={pick} sym={pick} wide={wide} onWide={() => setWide((w) => !w)} full={full} onFull={() => setFull((v) => !v)} onClose={() => { setPick(null); setFull(false); }} onPick={setPick} watch={watch} />}
       </main>

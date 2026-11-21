@@ -4,7 +4,7 @@ import { feed } from '../lib/feed';
 export interface SymbolInfo { s: string; name: string; ex: string; type: 'stock' | 'etf' | 'futures' | 'index' }
 
 let cache: Promise<SymbolInfo[]> | null = null;
-const loadSymbols = () => {
+export const loadSymbols = () => {
   if (!cache) cache = fetch('/api/symbols').then((r) => r.json()).catch(() => { cache = null; return []; });
   return cache;
 };
@@ -15,7 +15,7 @@ const FUT_ORDER = ['VN30F1M', 'VN30F2M', 'VN30F1Q', 'VN30F2Q'];
 const order = (x: { s: string }) => { const i = FUT_ORDER.indexOf(x.s); return i < 0 ? 99 : i; };
 const TYPE_LABEL: Record<string, string> = { stock: 'cổ phiếu', etf: 'ETF', futures: 'phái sinh', index: 'chỉ số' };
 // bỏ dấu tiếng Việt để tìm "son ha" ra "Sơn Hà"
-const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase();
+export const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase();
 
 function Hl({ text, q }: { text: string; q: string }) {
   if (!q) return <>{text}</>;

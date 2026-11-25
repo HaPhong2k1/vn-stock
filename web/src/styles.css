@@ -347,3 +347,5 @@ table.mom th { color: var(--muted); font-weight: 600; }
 .scr-search { padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; width: 280px; text-transform: uppercase; }
 .scr-search::placeholder { text-transform: none; }
 @media (max-width: 700px) { .scr-search { width: 100%; } }
+
+.chips .chip-n { opacity: .6; font-size: 10px; margin-left: 2px; }

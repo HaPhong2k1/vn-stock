@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Metrics } from '../lib/api';
 import { fmtBig } from '../lib/format';
 import { loadSymbols, fold } from './SymbolSearch';
@@ -49,11 +49,14 @@ interface Props { onPick: (s: string) => void; onQuickAlert: (s: string) => void
 
 export function Screener({ onPick, onQuickAlert, watch }: Props) {
   const [data, setData] = useState<{ asOf: string; loading: boolean; progress: { done: number; total: number }; rows: Metrics[] } | null>(null);
-  const [presets, setPresets] = useState<string[]>(['ma20up']);
-  const [ex, setEx] = useState('ALL');
-  const [minValue, setMinValue] = useState(1);     // GTGD tối thiểu (tỷ) để lọc mã thanh khoản kém
-  const [minAvgVol, setMinAvgVol] = useState(100_000);
-  const [onlyWatch, setOnlyWatch] = useState(false);
+  // Lựa chọn bộ lọc được ghi nhớ. Mặc định KHÔNG lọc thanh khoản (để không âm thầm loại mã nào).
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('scrOpts') || '{}'); } catch { return {}; } })();
+  const [presets, setPresets] = useState<string[]>(saved.presets ?? ['ma20up']);
+  const [ex, setEx] = useState<string>(saved.ex ?? 'ALL');
+  const [minValue, setMinValue] = useState<number>(saved.minValue ?? 0);     // GTGD tối thiểu (tỷ)
+  const [minAvgVol, setMinAvgVol] = useState<number>(saved.minAvgVol ?? 0);  // KL TB20 tối thiểu
+  const [onlyWatch, setOnlyWatch] = useState<boolean>(saved.onlyWatch ?? false);
+  useEffect(() => { try { localStorage.setItem('scrOpts', JSON.stringify({ presets, ex, minValue, minAvgVol, onlyWatch })); } catch { /* */ } }, [presets, ex, minValue, minAvgVol, onlyWatch]);
   // Tìm mã/tên công ty: khi có từ khoá thì tìm trong TOÀN BỘ mã (bỏ qua các bộ lọc) như ô tìm kiếm ở bảng giá
   const [q, setQ] = useState('');
   const [names, setNames] = useState<Map<string, string>>(new Map());
@@ -70,6 +73,13 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
   }, []);
 
   const fq = fold(q.trim());
+  const hiddenByLiq = useRef(0);
+  // số mã thoả từng bộ lọc (tính trên toàn thị trường, theo sàn đang chọn) — hiện trên nút
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const p of PRESETS) c[p.key] = (data?.rows || []).filter((m) => (ex === 'ALL' || m.ex === ex) && p.test(m)).length;
+    return c;
+  }, [data, ex]);
   const rows = useMemo(() => {
     if (!data) return [];
     if (fq) {
@@ -81,6 +91,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
     const out = data.rows.filter((m) =>
       (ex === 'ALL' || m.ex === ex) && m.value >= minValue && m.avgVol20 >= minAvgVol
       && (!onlyWatch || watch.has(m.s)) && preds.every((p) => p(m)));
+    hiddenByLiq.current = data.rows.filter((m) => (ex === 'ALL' || m.ex === ex) && (!onlyWatch || watch.has(m.s)) && preds.every((p) => p(m))).length - out.length;
     return out.sort((a, b) => {
       const x = a[sort.k] as any, y = b[sort.k] as any;
       if (x === y) return 0;
@@ -96,7 +107,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
       <div className="filters">
         <div className="chips">
           {PRESETS.map((p) => (
-            <button key={p.key} title={p.hint} className={presets.includes(p.key) ? 'on' : ''} onClick={() => toggle(p.key)}>{p.label}</button>
+            <button key={p.key} title={p.hint} className={presets.includes(p.key) ? 'on' : ''} onClick={() => toggle(p.key)}>{p.label} <small className="chip-n">{counts[p.key] ?? ''}</small></button>
           ))}
         </div>
         <div className="frow">
@@ -109,6 +120,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
           {fq && <button className="link" onClick={() => setQ('')}>✕ Xoá tìm kiếm</button>}
           <span className="muted">
             {fq && <b className="c-ref">Đang tìm “{q.trim()}” trong toàn bộ mã (bỏ qua bộ lọc) · </b>}{data ? `${rows.length} / ${data.rows.length} mã · lịch sử đến ${data.asOf || '…'}` : 'Đang tải…'}
+            {!fq && hiddenByLiq.current > 0 && <> · <b className="c-ref">{hiddenByLiq.current} mã khác thoả tín hiệu nhưng bị ẩn do điều kiện thanh khoản</b> <button className="link" onClick={() => { setMinValue(0); setMinAvgVol(0); }}>Hiện tất cả</button></>}
             {data?.loading && ` · đang tải lịch sử ${data.progress.done}/${data.progress.total}`}
             {err && <span className="c-down"> · {err}</span>}
           </span>
@@ -128,7 +140,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 300).map((m) => (
+            {rows.slice(0, 2000).map((m) => (
               <tr key={m.s} onClick={() => onPick(m.s)}>
                 {COLS.map((c) => <td key={c.k} className={c.cls?.(m) || ''}>{c.fmt ? c.fmt(m) : String(m[c.k])}</td>)}
                 <td className="tags">
@@ -149,7 +161,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
             ))}
           </tbody>
         </table>
-        {rows.length > 300 && <div className="muted empty">Hiển thị 300 / {rows.length} mã — thu hẹp bộ lọc để xem thêm.</div>}
+
         {data && !rows.length && <div className="empty">Không có mã nào thỏa điều kiện.</div>}
       </div>
     </div>

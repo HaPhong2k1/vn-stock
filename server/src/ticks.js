@@ -60,6 +60,7 @@ export class TickCollector {
     this.day = vnDate();
     this.session = this.sessionDay();
     this.dailyDone = '';
+    this.startedAt = Math.floor(Date.now() / 1000);
     store.on('stock', (st) => this.onStockEvent(st));
     setInterval(() => this.gc(), 5 * 60_000).unref();
     setInterval(() => this.persistPinned().catch((e) => this.log.warn('[ticks] lưu phút lỗi', e.message)), 60_000).unref();
@@ -210,6 +211,22 @@ export class TickCollector {
     if (st.ex !== 'PS' && !e.backfilled) await this.backfill(sym);
     const n = Math.min(500, Math.max(1, limit));
     return { symbol: sym, unit: st.ex === 'PS' ? 'HĐ' : 'CP', trades: e.tape.slice(-n).reverse().map(([t, p, v, side, est]) => ({ t, p, v, side, est })) };
+  }
+
+  /** Nến 1 phút (OHLCV) dựng từ lệnh khớp của phiên; completeFrom = mốc từ đó dữ liệu đầy đủ */
+  async minuteBars(sym) {
+    const st = this.store.stocks.get(sym);
+    if (!st) return null;
+    const e = this.entry(sym);
+    e.lastAccess = Date.now();
+    if (st.ex !== 'PS' && !e.backfilled) await this.backfill(sym);
+    // cổ phiếu: danh sách lệnh khớp cả phiên => đầy đủ; phái sinh: chỉ từ phút trọn vẹn đầu tiên sau khi server chạy
+    const completeFrom = st.ex === 'PS' ? Math.ceil((this.startedAt || 0) / 60) * 60 + 60 : 0;
+    const bars = [...e.min.values()].sort((a, b) => a.t - b.t).map((b) => {
+      let v = b.auction; for (const r of b.rows.values()) v += r[1] + r[2];
+      return { time: b.t, open: b.o, high: b.h, low: b.l, close: b.c, volume: v };
+    });
+    return { bars, completeFrom };
   }
 
   dayProfile(e) {

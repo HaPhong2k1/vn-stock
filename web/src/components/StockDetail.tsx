@@ -11,6 +11,7 @@ import { analyzeFootprint, autoRowSize, tickOf } from '../../../shared/footprint
 import { Backtest } from './Backtest';
 import { SymbolSearch } from './SymbolSearch';
 import { useGlobal } from '../lib/hooks';
+import { feed } from '../lib/feed';
 import { INDICATORS, IND_BY_ID, type IndResult } from '../lib/indicatorDefs';
 import { IndicatorDialog, type BuiltIn } from './IndicatorDialog';
 import { DrawToolbar, DrawEditBar } from './DrawToolbar';
@@ -69,6 +70,9 @@ const RANGES: { k: string; res: string; days: number | 'ytd' | 'all' }[] = [
   { k: '1N', res: '1', days: 1 }, { k: '5N', res: '5', days: 5 }, { k: '1T', res: '1H', days: 31 }, { k: '3T', res: '1D', days: 92 },
   { k: '6T', res: '1D', days: 183 }, { k: 'YTD', res: '1D', days: 'ytd' }, { k: '1 năm', res: '1D', days: 365 }, { k: 'Tất cả', res: '1W', days: 'all' },
 ];
+
+/** Thứ Hai 00:00 UTC của tuần chứa t (mốc nến tuần) */
+const weekStartOf = (t: number) => { const d = new Date((t + 7 * 3600) * 1000); const dow = (d.getUTCDay() + 6) % 7; return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow) / 1000; };
 
 const INDEX_CODE: Record<string, string> = { VNINDEX: '10', VN30: '11', HNX: '02', HNX30: '12', UPCOM: '03' };
 
@@ -646,7 +650,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     let dead = false;
     setErr('');
     const to = Math.floor(Date.now() / 1000);
-    fetch(`/api/history?symbol=${sym}&resolution=${res}&from=${to - SPAN[res] * 86400}&to=${to}`)
+    fetch(`/api/candles?symbol=${sym}&resolution=${res}&from=${to - SPAN[res] * 86400}&to=${to}`)
       .then((r) => r.json())
       .then((rows: Bar[] | { error: string }) => {
         if (dead) return;
@@ -666,8 +670,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     return () => { dead = true; };
   }, [sym, res, render, applyRange]);
 
-  // Cập nhật nến cuối theo từng lệnh khớp; vẽ lại tối đa ~3 lần/giây
+  // Cập nhật nến cuối theo từng lệnh khớp (giá tức thời); KL & nến mới được server đồng bộ 2–3 giây/lần bên dưới
   const pending = useRef(false);
+  const schedRender = useCallback(() => { if (!pending.current) { pending.current = true; setTimeout(() => { pending.current = false; render(); }, 250); } }, [render]);
   useEffect(() => {
     const b = bars.current;
     if (!st || !st.last || !b.length) return;
@@ -681,18 +686,37 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         bar = { time: Date.parse(today + 'T02:00:00Z') / 1000, open: st.open || st.last, high: st.last, low: st.last, close: st.last, volume: 0 };
         append = true;
       }
+      if (res === '1W' && bar.time < weekStartOf(now)) return; // tuần mới: chờ server tạo nến tuần
       bar = { ...bar, close: st.last, high: Math.max(bar.high, st.high || st.last), low: Math.min(bar.low, st.low || st.last), volume: res === '1D' && !isIndex ? st.totVol : bar.volume };
     } else {
       const step = STEP[res];
-      const bucket = Math.floor(now / step) * step;
-      const delta = lastTot.current && !isIndex ? Math.max(0, st.totVol - lastTot.current) : 0;
-      if (bucket > bar.time) { bar = { time: bucket, open: st.last, high: st.last, low: st.last, close: st.last, volume: delta }; append = true; }
-      else bar = { ...bar, close: st.last, high: Math.max(bar.high, st.last), low: Math.min(bar.low, st.last), volume: bar.volume + delta };
+      const bucket = Math.floor((now - (feed.clockSkew || 0) / 1000) / step) * step; // theo giờ server
+      if (bucket > bar.time) { bar = { time: bucket, open: st.last, high: st.last, low: st.last, close: st.last, volume: 0 }; append = true; }
+      else bar = { ...bar, close: st.last, high: Math.max(bar.high, st.last), low: Math.min(bar.low, st.last) };
     }
-    lastTot.current = st.totVol;
     if (append) b.push(bar); else b[b.length - 1] = bar;
-    if (!pending.current) { pending.current = true; setTimeout(() => { pending.current = false; render(); }, 300); }
-  }, [st, res, render, isIndex]);
+    schedRender();
+  }, [st, res, schedRender, isIndex]);
+
+  // Đồng bộ phần nến gần đây từ server (nến dựng từ lệnh khớp / nến 1 phút): đúng OHLC & khối lượng, không bị trễ như API nến
+  useEffect(() => {
+    let dead = false;
+    const intraday = !!STEP[res];
+    const sync = () => {
+      const to = Math.floor(Date.now() / 1000);
+      fetch(`/api/candles?symbol=${sym}&resolution=${res}&recent=1&to=${to}`).then((r) => r.json()).then((rows: Bar[] | { error: string }) => {
+        if (dead || !Array.isArray(rows) || !rows.length) return;
+        const b = bars.current; if (!b.length) return;
+        const first = rows[0].time;
+        // giữ phần cũ hơn, thay toàn bộ phần mới bằng dữ liệu server
+        let i = b.length; while (i > 0 && b[i - 1].time >= first) i--;
+        b.splice(i, b.length - i, ...rows);
+        schedRender();
+      }).catch(() => {});
+    };
+    const t = setInterval(sync, intraday ? 2500 : 5000);
+    return () => { dead = true; clearInterval(t); };
+  }, [sym, res, schedRender]);
 
   const quickAlert = async (type: string, value?: number) => {
     try {

@@ -17,6 +17,7 @@ import { AlertEngine, ALERT_TYPES } from './alerts.js';
 import { createStorage } from './storage.js';
 import { startKeepAlive } from './keepalive.js';
 import { TickCollector } from './ticks.js';
+import { Candles } from './candles.js';
 
 const store = new MarketStore();
 const provider = config.provider === 'sim' ? new SimProvider(store) : new VpsProvider(store);
@@ -27,6 +28,7 @@ const storage = await createStorage();
 const alerts = new AlertEngine(store, analytics, storage);
 const ticks = new TickCollector(store, storage);
 provider.ticks = ticks;
+const candles = new Candles(store, ticks, daily);
 await alerts.init();
 const app = express();
 app.use(compression());
@@ -81,6 +83,11 @@ app.get('/api/footprint', async (req, res) => {
     if (!TF.has(tf)) throw Object.assign(new Error('tf không hợp lệ'), { status: 400 });
     res.json(await ticks.footprint(String(req.query.symbol || '').toUpperCase(), tf));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Nến cho biểu đồ (DNSE + dựng lại từ nến 1 phút / lệnh khớp cho phần gần đây). recent=1: chỉ phần mới để cập nhật liên tục
+app.get('/api/candles', async (req, res) => {
+  try { res.json(await candles.get(req.query.symbol, String(req.query.resolution || '1D'), { from: req.query.from, to: req.query.to, recent: req.query.recent === '1' })); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 app.get('/api/trades', async (req, res) => {
   try { res.json(await ticks.trades(String(req.query.symbol || '').toUpperCase(), Number(req.query.limit) || 100)); }

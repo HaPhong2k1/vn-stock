@@ -179,7 +179,7 @@ main.wide .chart { height: 480px; }
 /* Toàn màn hình: chỉ giữ thanh công cụ + biểu đồ giá (chiếm phần lớn) + RSI/MACD */
 .detail.full { position: fixed; inset: 0; z-index: 50; width: 100% !important; border: 0; display: flex; flex-direction: column; overflow: hidden; }
 .detail.full .chart { flex: 1; height: auto; min-height: 260px; }
-.detail.full .chart.osc { flex: 0 0 140px; height: 140px; min-height: 0; margin-bottom: 4px; }
+.detail.full .chart.osc { min-height: 0; margin-bottom: 4px; }
 
 /* ---- Hộp tìm kiếm mã ---- */
 .sym-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 2px 10px; }
@@ -256,8 +256,25 @@ main.wide .chart { height: 480px; }
 @media (max-width: 700px) { .ps-panel { right: 62px; width: 170px; } .ps-tot b { font-size: 13px; } }
 
 /* ---- Chú thích OHLC, thanh dưới, replay, bảng phụ ---- */
-.ohlc-legend { position: absolute; left: 8px; top: 4px; z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; font-variant-numeric: tabular-nums; pointer-events: none;
+.ohlc-legend { position: absolute; left: 8px; top: 4px; z-index: 5; display: flex; flex-direction: column; gap: 2px; max-width: calc(100% - 90px); font-size: 11px; font-variant-numeric: tabular-nums; pointer-events: none;
   background: color-mix(in srgb, var(--panel) 70%, transparent); padding: 2px 6px; border-radius: 4px; }
+.lg-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.lg-sym { font-size: 14px; }
+.lg-meta { color: var(--muted); font-weight: 600; margin-left: -6px; }
+.lg-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+/* Thanh kéo giãn các vùng biểu đồ */
+.splitter { flex: 0 0 auto; position: relative; z-index: 8; background: var(--line); transition: background .15s; touch-action: none; }
+.splitter.h { height: 5px; cursor: row-resize; margin: 0 4px; border-radius: 2px; }
+.splitter.v { width: 5px; cursor: col-resize; }
+.splitter:hover, body.resizing .splitter { background: var(--floor); }
+.splitter.h::after { content: ''; position: absolute; left: 50%; top: 1px; width: 32px; height: 3px; margin-left: -16px; border-radius: 2px; background: var(--muted); opacity: .6; }
+.splitter.v::after { content: ''; position: absolute; top: 50%; left: 1px; height: 32px; width: 3px; margin-top: -16px; border-radius: 2px; background: var(--muted); opacity: .6; }
+body.resizing { user-select: none; }
+body.resizing-h, body.resizing-h * { cursor: row-resize !important; }
+body.resizing-v, body.resizing-v * { cursor: col-resize !important; }
+body.resizing canvas { pointer-events: none; }
+.osc-toggle { margin-left: auto; }
+@media (max-width: 900px) { .splitter.v { display: none; } }
 select.expand { font: inherit; color: var(--text); }
 .expand.on { background: var(--floor); color: #fff; border-color: var(--floor); }
 .chart-foot { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border-top: 1px solid var(--line); font-size: 11px; flex-wrap: wrap; }

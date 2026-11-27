@@ -35,15 +35,22 @@ async function dnse(symbol, resolution, from, to, ttlMs) {
 
 /** Gộp nến (đã sắp xếp) theo khung tf giây */
 export function aggregate(bars, tf) {
+  const key = typeof tf === 'function' ? tf : (t) => Math.floor(t / tf) * tf;
   const out = [];
   for (const b of bars) {
-    const t = Math.floor(b.time / tf) * tf;
+    const t = key(b.time);
     const last = out[out.length - 1];
     if (last && last.time === t) { last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low); last.close = b.close; last.volume += b.volume; }
     else out.push({ time: t, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
   }
   return out;
 }
+
+/** Nến 4 giờ theo phiên (như TradingView/Fiant với HOSE): 09:00 = phiên sáng, 13:00 = phiên chiều (giờ VN) */
+export const bucket4H = (t) => { const d = Math.floor((t + 7 * 3600) / 86400) * 86400 - 7 * 3600; return d + ((t + 7 * 3600) % 86400 < 13 * 3600 ? 9 : 13) * 3600; };
+/** Nến tháng: 00:00 UTC ngày 1 của tháng (theo ngày giờ VN) */
+export const monthStart = (t) => { const d = new Date((t + 7 * 3600) * 1000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000; };
+const vnDayStart = (t) => Math.floor((t + 7 * 3600) / 86400) * 86400 - 7 * 3600;
 
 export class Candles {
   constructor(store, ticks, daily) { this.store = store; this.ticks = ticks; this.daily = daily; }
@@ -64,9 +71,24 @@ export class Candles {
     return [...map.values()].sort((a, b) => a.time - b.time);
   }
 
+  /** 4 giờ (gộp từ nến 1 giờ) và 1 tháng (gộp từ nến ngày) — DNSE không có sẵn 2 khung này */
+  async derived(symbol, res, { from, to, recent }) {
+    const now = Math.floor(Date.now() / 1000);
+    to = Number(to) || now;
+    if (res === '4H') {
+      from = Number(from) || to - 240 * 86400;
+      if (recent) from = Math.max(from, vnDayStart(now - 2 * 86400)); // bắt đầu từ đầu ngày => không có nến 4H bị cắt dở
+      return aggregate(await this.get(symbol, '1H', { from, to }), bucket4H);
+    }
+    from = Number(from) || to - 25 * 365 * 86400;
+    if (recent) { const d = new Date((now + 7 * 3600) * 1000); from = Math.max(from, Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1) / 1000 - 7 * 3600); }
+    return aggregate(await this.get(symbol, '1D', { from, to }), monthStart);
+  }
+
   async get(symbol, res, { from, to, recent } = {}) {
     symbol = String(symbol || '').toUpperCase();
     if (!/^[A-Z0-9]{2,12}$/.test(symbol)) throw Object.assign(new Error('symbol không hợp lệ'), { status: 400 });
+    if (res === '4H' || res === '1M') return this.derived(symbol, res, { from, to, recent });
     if (!TF[res] && res !== '1D' && res !== '1W') throw Object.assign(new Error('resolution không hợp lệ'), { status: 400 });
     const now = Math.floor(Date.now() / 1000);
     to = Number(to) || now; from = Number(from) || to - (TF[res] ? 5 : 730) * 86400;

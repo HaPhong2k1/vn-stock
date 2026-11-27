@@ -4,14 +4,14 @@ import { feed } from '../lib/feed';
 import * as I from '../../../shared/indicators.js';
 
 type Tab = 'watch' | 'tape' | 'info';
-interface Props { sym: string; watch: string[]; onPick: (s: string) => void }
+interface Props { sym: string; watch: string[]; onPick: (s: string) => void; width?: number }
 
 /** Bảng phụ bên phải biểu đồ toàn màn hình: Danh mục · Khớp lệnh · Thông tin */
-export function SidePanel({ sym, watch, onPick }: Props) {
+export function SidePanel({ sym, watch, onPick, width }: Props) {
   const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem('sideTab') as Tab) || 'watch'; } catch { return 'watch'; } });
   useEffect(() => { try { localStorage.setItem('sideTab', tab); } catch { /* */ } }, [tab]);
   return (
-    <div className="side-panel">
+    <div className="side-panel" style={width ? { width } : undefined}>
       <div className="side-tabs">
         {([['watch', '★ Danh mục'], ['tape', 'Khớp lệnh'], ['info', 'Thông tin']] as [Tab, string][]).map(([k, l]) => (
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>

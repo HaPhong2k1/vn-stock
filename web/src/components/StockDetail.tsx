@@ -412,6 +412,12 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     if (fit) { x.chart.timeScale().fitContent(); }
   }, []);
 
+  // Chữ chìm giữa biểu đồ (như TradingView/Fiant): "FPT, 1D"
+  useEffect(() => {
+    const c = s.current.chart; if (!c) return;
+    const dk = matchMedia('(prefers-color-scheme: dark)').matches;
+    c.applyOptions({ watermark: { visible: true, text: `${sym}, ${RES_SHORT[res]}`, fontSize: 72, fontStyle: '600', color: dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', horzAlign: 'center', vertAlign: 'center' } });
+  }, [sym, res]);
   redrawRef.current = redraw;
   useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, chartType, render]);
   // Replay: render lại khi đổi vị trí; tự phát theo tốc độ

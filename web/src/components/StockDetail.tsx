@@ -117,6 +117,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   useEffect(() => { try { localStorage.setItem('chartType', chartType); } catch { /* */ } }, [chartType]);
   const [logScale, setLogScale] = useState(false);
   const [autoScale, setAutoScale] = useState(true);
+  const [oscAuto, setOscAuto] = useState(true); // khung dưới: tự khớp thang giá với dữ liệu trên màn hình
   const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem('sideOpen') !== '0'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('sideOpen', sideOpen ? '1' : '0'); } catch { /* */ } }, [sideOpen]);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -345,6 +346,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     x.oscH.setData(oscR?.hist ? b.map((v, i) => (oscR.hist!.values[i] === null ? { time: T(v.time) } : { time: T(v.time), value: oscR.hist!.values[i]!, color: oscR.hist!.colors?.[i] })) : []);
     const lvKey = osc;
     if (x.oscLevelKey !== lvKey) {
+      // đổi chỉ báo (MACD -> Stoch/RSI...): thang giá khác hẳn => luôn bật lại tự khớp
+      x.chart2.priceScale('right').applyOptions({ autoScale: true });
+      setOscAuto(true);
       x.oscLevels.forEach((pl: any) => x.oscL[0].removePriceLine(pl));
       x.oscLevels = (oscR?.levels || []).map((lv) => x.oscL[0].createPriceLine({ price: lv.v, color: lv.color, lineStyle: LineStyle.Dotted, lineWidth: 1, axisLabelVisible: true }));
       x.oscLevelKey = lvKey;
@@ -435,6 +439,20 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     const x = s.current; if (!x.chart) return;
     x.chart.priceScale('right').applyOptions({ mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal, autoScale });
   }, [logScale, autoScale]);
+  useEffect(() => { s.current.chart2?.priceScale('right').applyOptions({ autoScale: oscAuto }); }, [oscAuto]);
+  /** Khi người dùng kéo/cuộn thang giá, thư viện tự tắt chế độ tự khớp => cập nhật trạng thái nút A/AUTO */
+  const syncAuto = useCallback(() => {
+    requestAnimationFrame(() => {
+      const x = s.current; if (!x.chart) return;
+      setAutoScale(x.chart.priceScale('right').options().autoScale);
+      setOscAuto(x.chart2.priceScale('right').options().autoScale);
+    });
+  }, []);
+  useEffect(() => {
+    const evs = ['mouseup', 'touchend', 'wheel', 'dblclick'] as const;
+    evs.forEach((e) => addEventListener(e, syncAuto, { capture: true, passive: true }));
+    return () => evs.forEach((e) => removeEventListener(e, syncAuto, { capture: true }));
+  }, [syncAuto]);
   /** Chọn khoảng thời gian: đổi khung phù hợp rồi phóng tới khoảng đó sau khi dữ liệu tải xong */
   const applyRange = useCallback((k: string) => {
     const x = s.current, b = bars.current;
@@ -477,6 +495,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     if (!x.chart) return;
     x.chart.priceScale('right').applyOptions({ autoScale: true });
     x.chart2.priceScale('right').applyOptions({ autoScale: true });
+    setAutoScale(true); setOscAuto(true);
     if (opts.current.fpS.enabled && FP_TF[opts.current.res] !== undefined) { fpZoomed.current = false; render(); return; }
     const r = { from: Math.max(0, n - 120), to: n + 5 };
     x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r);
@@ -880,7 +899,10 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         {['rsi', 'macd', 'stoch', 'adx'].map((id) => <button key={id} className={osc === id ? 'on' : ''} onClick={() => setOsc(id)}>{IND_BY_ID[id].short}</button>)}
         <button className="osc-toggle" onClick={() => setOscH((h) => (h < 40 ? 140 : 0))} title={oscH < 40 ? 'Hiện khung chỉ báo dưới' : 'Thu gọn khung chỉ báo dưới'}>{oscH < 40 ? '▴' : '▾'}</button>
       </div>
-      <div className="chart osc" ref={el2} style={{ height: oscH, flex: `0 0 ${oscH}px`, display: oscH < 40 ? 'none' : undefined }} />
+      <div className="chart osc" ref={el2} style={{ height: oscH, flex: `0 0 ${oscH}px`, display: oscH < 40 ? 'none' : undefined }}>
+        <button className={`osc-auto${oscAuto ? ' on' : ''}`} onClick={() => setOscAuto((v) => !v)}
+          title={oscAuto ? 'Tự động (khớp dữ liệu với màn hình) — đang bật' : 'Bấm để tự động khớp thang giá với dữ liệu trên màn hình'}>A</button>
+      </div>
       <div className="chart-foot">
         {replay.mode === 'on' ? (
           <div className="replay-ctl">

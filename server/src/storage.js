@@ -7,14 +7,56 @@ import { fileURLToPath } from 'node:url';
  * - Có DATABASE_URL (Postgres, VD Neon miễn phí) => lưu vào DB, không mất khi server khởi động lại/deploy.
  * - Không có => lưu file JSON (chỉ phù hợp chạy trên máy cá nhân).
  */
+/**
+ * Làm sạch chuỗi kết nối hay bị dán sai: cả lệnh `psql '...'`, dấu nháy, "DATABASE_URL=", khoảng trắng/xuống dòng.
+ * Trả về null nếu không phải postgres://... hợp lệ.
+ */
+export function cleanDbUrl(raw) {
+  let u = String(raw || '').trim();
+  const m = u.match(/postgres(?:ql)?:\/\/[^\s'"`]+/i);
+  if (!m) return null;
+  u = m[0];
+  try {
+    const x = new URL(u);
+    if (!x.hostname) return null;
+    x.searchParams.delete('channel_binding'); // thư viện pg không cần tham số này của Neon
+    // pg hiện coi require = verify-full; ghi rõ để khỏi cảnh báo SECURITY WARNING trong log
+    if (['require', 'prefer', 'verify-ca'].includes(x.searchParams.get('sslmode') || '')) x.searchParams.set('sslmode', 'verify-full');
+    return x.toString();
+  } catch { return null; }
+}
+/** Che mật khẩu khi ghi log */
+export const maskDbUrl = (u) => String(u).replace(/(\/\/[^:/@]+:)[^@]*@/, '$1***@');
+
 export async function createStorage(log = console) {
-  const url = process.env.DATABASE_URL;
-  const s = url ? new PgStorage(url, log) : new FileStorage(log);
-  await s.init();
+  const raw = process.env.DATABASE_URL;
+  let s = null;
+  if (raw && raw.trim()) {
+    const url = cleanDbUrl(raw);
+    if (!url) {
+      log.error('[storage] DATABASE_URL KHÔNG HỢP LỆ (phải có dạng postgresql://user:matkhau@host/dbname?sslmode=require). Tạm dùng file JSON.');
+    } else {
+      try {
+        s = new PgStorage(url, log);
+        await s.init();
+      } catch (e) {
+        const hint = e.code === '25006' ? ' => Chuỗi kết nối đang ở chế độ CHỈ ĐỌC (read replica / role chỉ đọc). Trong Neon > Connect hãy chọn Compute "Primary" (không phải Read replica) và role owner (VD neondb_owner).'
+          : e.code === '28P01' ? ' => Sai mật khẩu/role.' : e.code === '3D000' ? ' => Sai tên database.' : '';
+        log.error(`[storage] KHÔNG KẾT NỐI ĐƯỢC Postgres (${maskDbUrl(url)}): ${e.message}.${hint} Tạm dùng file JSON — server vẫn chạy.`);
+        try { await s?.pool?.end(); } catch { /* */ }
+        s = null;
+        storageError = e.message;
+      }
+    }
+    if (!s) storageError ||= 'DATABASE_URL không hợp lệ';
+  }
+  if (!s) { s = new FileStorage(log); await s.init(); }
+  s.error = storageError;
   log.info(`[storage] dùng ${s.kind}`);
-  if (!url && process.env.RENDER) log.warn('[storage] CHƯA có DATABASE_URL: cảnh báo đang lưu tạm, sẽ MẤT khi server khởi động lại/deploy. Thêm DATABASE_URL (Postgres, VD Neon) trong Render > Environment.');
+  if (!raw && process.env.RENDER) log.warn('[storage] CHƯA có DATABASE_URL: cảnh báo đang lưu tạm, sẽ MẤT khi server khởi động lại/deploy. Thêm DATABASE_URL (Postgres, VD Neon) trong Render > Environment.');
   return s;
 }
+let storageError = null;
 
 class FileStorage {
   kind = 'file JSON';
@@ -69,7 +111,7 @@ class PgStorage {
     const { default: pg } = await import('pg');
     const local = /localhost|127\.0\.0\.1|\/tmp|host=\//.test(this.url);
     this.pool = new pg.Pool({
-      connectionString: this.url, max: 5, idleTimeoutMillis: 30_000,
+      connectionString: this.url, max: 5, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 15_000,
       ssl: local ? false : { rejectUnauthorized: false },
     });
     this.pool.on('error', (e) => this.log.warn('[storage] pg', e.message));

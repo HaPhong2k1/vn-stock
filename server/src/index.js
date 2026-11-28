@@ -54,7 +54,7 @@ app.delete('/api/alerts/:id', wrap((req) => { alerts.remove(owner(req), req.para
 app.get('/api/health', (_req, res) => res.json({
   ok: true, provider: config.provider, session: sessionOf(), symbols: store.stocks.size,
   feed: provider.status, lastFeedAt: store.lastFeedAt,
-  storage: storage.kind, alerts: alerts.alerts.length,
+  storage: storage.kind, storageError: storage.error || undefined, alerts: alerts.alerts.length,
   history: { asOf: daily.asOf, loading: daily.loading, progress: daily.progress, symbols: daily.bars.size },
 }));
 app.get('/api/groups', (_req, res) => res.json(store.groups));

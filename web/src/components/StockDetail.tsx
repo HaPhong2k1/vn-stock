@@ -16,6 +16,9 @@ import { INDICATORS, IND_BY_ID, type IndResult } from '../lib/indicatorDefs';
 import { IndicatorDialog, type BuiltIn } from './IndicatorDialog';
 import { DrawToolbar, DrawEditBar } from './DrawToolbar';
 import { SidePanel } from './SidePanel';
+import { EwPanel } from './EwPanel';
+import { computeEW, EW_DEFAULTS, type EwOptions, type EwResult } from '../../../shared/ewave.js';
+import { drawEW } from '../lib/ewDraw';
 import { TimeMap, renderDrawing, hitDrawing, dragHandle, moveDrawing, makeDrawing, toolName, toolPts, hasText, canFill, canExtend, loadDrawings, saveDrawings, type DCtx, type Drawing, type Pt, type Tool } from '../lib/drawings';
 
 const load = <T,>(k: string, d: T): T => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return d; } };
@@ -174,18 +177,26 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   const [btRes, setBtRes] = useState<BtResult | null>(null);
   const [smcOpen, setSmcOpen] = useState(false);
   useEffect(() => saveLS('smc', smcS), [smcS]);
+  // ---- Elliott Wave Analyzer Pro (Ahmad PRO)
+  const [ewS, setEwS] = useState<EwOptions & { enabled: boolean }>(() => load('ew', { ...EW_DEFAULTS, enabled: false }));
+  useEffect(() => saveLS('ew', ewS), [ewS]);
+  const [ewOpen, setEwOpen] = useState(false);
+  const [ewRes, setEwRes] = useState<EwResult | null>(null);
+  /** Khoảng trống bên phải biểu đồ: Ahmad PRO vẽ vùng MUA/BÁN & mục tiêu ra phía tương lai */
+  const rightPad = () => (opts.current.ewS.enabled ? Math.round(opts.current.ewS.zoneWidth * 1.6) + 14 : 5);
+  const ewHtf = useRef<{ sym: string; d: Bar[]; w: Bar[] }>({ sym: '', d: [], w: [] });
   useEffect(() => saveLS('emaCross', ema), [ema]);
   useEffect(() => saveLS('btOpts', { ...bt, end: undefined }), [bt]);
   const overlay = useRef<HTMLCanvasElement>(null);
-  const drawState = useRef<{ smc: any; idx: Map<number, number>; fill: any; fp: FpDraw | null }>({ smc: null, idx: new Map(), fill: null, fp: null });
+  const drawState = useRef<{ smc: any; idx: Map<number, number>; fill: any; fp: FpDraw | null; ew?: EwResult | null }>({ smc: null, idx: new Map(), fill: null, fp: null });
   const [fpS, setFpS] = useState<FpSettings>(() => load('fp', FP_UI_DEFAULTS));
   useEffect(() => saveLS('fp', fpS), [fpS]);
   const [fpOpen, setFpOpen] = useState(false);
   const [fpInfo, setFpInfo] = useState<{ n: number; est: number; days?: number; err?: string } | null>(null);
   const fpRaw = useRef<any>(null);
   const fpZoomed = useRef(false);
-  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType });
-  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType };
+  const opts = useRef({ ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType, ewS, sym });
+  opts.current = { ov, osc, smcS, ema, bt, fpS, res, st, inds, chartType, ewS, sym };
   const drawRef = useRef({ drawings, hideDraw, selId, tool, lockAll, magnet, keepTool, drawColor });
   drawRef.current = { drawings, hideDraw, selId, tool, lockAll, magnet, keepTool, drawColor };
   const dark = matchMedia('(prefers-color-scheme: dark)').matches;
@@ -197,10 +208,11 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   };
   const redraw = useCallback(() => {
     const x = s.current;
-    if (!overlay.current || !x.chart) return;
+    if (!overlay.current || !x.chart || x.dead) return;
     const d = drawState.current;
     drawOverlay(overlay.current, x.chart, x.candle, d.smc, opts.current.smcS, d.idx, d.fill, dark);
     if (d.fp) drawFootprint(overlay.current, x.chart, x.candle, d.fp, d.idx, dark);
+    if (d.ew) drawEW(overlay.current, x.chart, x.candle, d.ew, dark);
     // ---- hình vẽ
     const cv = drawCv.current;
     if (cv) {
@@ -258,7 +270,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
       if (syncing || !r) return; syncing = true; to.timeScale().setVisibleLogicalRange(r); syncing = false;
     });
     sync(c, c2); sync(c2, c);
-    x.chart = c; x.chart2 = c2;
+    x.chart = c; x.chart2 = c2; x.dead = false;
     // Chú thích O/H/L/C theo con trỏ
     let rafL = 0;
     c.subscribeCrosshairMove((param) => {
@@ -285,14 +297,14 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     const box = el.current!;
     ['pointermove', 'wheel', 'pointerup', 'dblclick'].forEach((ev) => box.addEventListener(ev, schedule, { passive: true }));
     const ro = new ResizeObserver(schedule); ro.observe(box);
-    return () => { ro.disconnect(); cancelAnimationFrame(raf); c.remove(); c2.remove(); };
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); x.dead = true; c.remove(); c2.remove(); };
   }, []);
 
   /** Tính lại toàn bộ chỉ báo từ mảng nến và vẽ lại */
   const render = useCallback((fit = false) => {
     const rp = replayRef.current;
     const b = rp.mode === 'on' ? bars.current.slice(0, rp.idx + 1) : bars.current, x = s.current;
-    if (!x.candle) return;
+    if (!x.candle || x.dead) return;
     const { ov, osc, smcS, ema, bt, fpS, res: curRes, st: curSt } = opts.current;
     const closes = b.map((v) => v.close);
     // Smart Money Concepts (LuxAlgo)
@@ -380,7 +392,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
       const nBars = Math.max(6, Math.floor(width / 96));
       const r = { from: b.length - nBars, to: b.length + 1 };
       // đặt cho cả 2 biểu đồ (giá & dao động) — tránh biểu đồ phụ đồng bộ ngược làm mất mức phóng to
-      const apply = () => { x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r); };
+      const apply = () => { if (x.dead) return; x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r); };
       requestAnimationFrame(apply); setTimeout(apply, 150);
     }
     // Đánh dấu tín hiệu: giá đóng cửa cắt lên MA20 = MUA, cắt xuống = BÁN
@@ -400,7 +412,16 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     }
     marks.sort((p, q) => (p.time as number) - (q.time as number));
     x.candle.setMarkers(marks);
-    drawState.current = { smc, idx: fpIdx, fill: btr ? { fast: btr.emaFast, slow: btr.emaSlow } : null, fp: fpd };
+    // Ahmad PRO: dữ liệu khung Ngày/Tuần để chấm xu hướng đa khung (cắt theo nến cuối khi đang replay)
+    let ew: EwResult | null = null;
+    const { ewS } = opts.current;
+    if (ewS.enabled && b.length > 20) {
+      const lastT = b[b.length - 1].time, hv = ewHtf.current.sym === opts.current.sym ? ewHtf.current : { d: [], w: [] };
+      const cut = (a: Bar[]) => a.filter((v) => v.time <= lastT);
+      ew = computeEW(b, ewS, { d: curRes === '1D' ? b : cut(hv.d), w: curRes === '1W' ? b : cut(hv.w) });
+    }
+    setEwRes(ew);
+    drawState.current = { smc, idx: fpIdx, fill: btr ? { fast: btr.emaFast, slow: btr.emaSlow } : null, fp: fpd, ew };
     setBtRes(btr);
     requestAnimationFrame(() => redrawRef.current());
     legendLines.current = [
@@ -423,7 +444,24 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     c.applyOptions({ watermark: { visible: true, text: `${sym}, ${RES_SHORT[res]}`, fontSize: 72, fontStyle: '600', color: dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', horzAlign: 'center', vertAlign: 'center' } });
   }, [sym, res]);
   redrawRef.current = redraw;
-  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, chartType, render]);
+  useEffect(() => { render(); }, [ov, osc, smcS, ema, bt, fpS, inds, chartType, ewS, render]);
+  // Bật Ahmad PRO: nới khung nhìn sang phải để thấy vùng MUA/BÁN và mục tiêu
+  useEffect(() => {
+    const x = s.current, n = bars.current.length;
+    if (!ewS.enabled || !x.chart || x.dead || !n) return;
+    const r = x.chart.timeScale().getVisibleLogicalRange();
+    if (r && r.to < n + rightPad() - 2) { const nr = { from: r.from, to: n + rightPad() }; x.chart.timeScale().setVisibleLogicalRange(nr); x.chart2.timeScale().setVisibleLogicalRange(nr); }
+  }, [ewS.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Ahmad PRO cần nến Ngày & Tuần (xu hướng đa khung) — tải khi bật, làm mới mỗi phút
+  useEffect(() => {
+    if (!ewS.enabled) return;
+    let dead = false;
+    const get = (r: string) => fetch(`/api/candles?symbol=${sym}&resolution=${r}`).then((x) => x.json()).then((a) => (Array.isArray(a) ? a : []));
+    const loadHtf = () => Promise.all([get('1D'), get('1W')]).then(([d, w]) => { if (!dead) { ewHtf.current = { sym, d, w }; render(); } }).catch(() => {});
+    loadHtf();
+    const t = setInterval(loadHtf, 60_000);
+    return () => { dead = true; clearInterval(t); };
+  }, [sym, ewS.enabled, render]);
   // Replay: render lại khi đổi vị trí; tự phát theo tốc độ
   useEffect(() => { render(); if (replay.mode === 'on') s.current.chart?.timeScale().scrollToRealTime(); }, [replay.mode, replay.idx, render]);
   useEffect(() => {
@@ -443,7 +481,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   /** Khi người dùng kéo/cuộn thang giá, thư viện tự tắt chế độ tự khớp => cập nhật trạng thái nút A/AUTO */
   const syncAuto = useCallback(() => {
     requestAnimationFrame(() => {
-      const x = s.current; if (!x.chart) return;
+      const x = s.current; if (!x.chart || x.dead) return;
       setAutoScale(x.chart.priceScale('right').options().autoScale);
       setOscAuto(x.chart2.priceScale('right').options().autoScale);
     });
@@ -497,7 +535,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
     x.chart2.priceScale('right').applyOptions({ autoScale: true });
     setAutoScale(true); setOscAuto(true);
     if (opts.current.fpS.enabled && FP_TF[opts.current.res] !== undefined) { fpZoomed.current = false; render(); return; }
-    const r = { from: Math.max(0, n - 120), to: n + 5 };
+    const r = { from: Math.max(0, n - 120), to: n + rightPad() };
     x.chart.timeScale().setVisibleLogicalRange(r); x.chart2.timeScale().setVisibleLogicalRange(r);
   }, [render]);
 
@@ -663,13 +701,14 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
   /** Khôi phục bộ chỉ báo mặc định */
   const resetIndicators = () => {
     setOv({ ma6: false, ma10: false, ma20: true, ma50: true, ma200: false, bb: false, signals: true });
-    setInds([]); setOsc('rsi'); setSmcS({ ...smcS, enabled: false }); setFpS({ ...fpS, enabled: false }); setEma({ ...ema, enabled: false, showBt: false });
+    setInds([]); setOsc('rsi'); setSmcS({ ...smcS, enabled: false }); setEwS({ ...ewS, enabled: false }); setFpS({ ...fpS, enabled: false }); setEma({ ...ema, enabled: false, showBt: false });
   };
   const builtins: BuiltIn[] = [
     ...MAS.map((m) => ({ id: m.k, name: `MA ${m.n}`, desc: `Trung bình động đơn giản ${m.n} kỳ`, on: !!ov[m.k], toggle: () => setOv((o: any) => ({ ...o, [m.k]: !o[m.k] })), group: 'overlay' as const })),
     { id: 'bb', name: 'Bollinger Bands (20, 2)', desc: 'Dải biến động quanh MA20', on: !!ov.bb, toggle: () => setOv((o: any) => ({ ...o, bb: !o.bb })), group: 'overlay' },
     { id: 'sig', name: 'Tín hiệu MUA/BÁN cắt MA20', desc: 'Mũi tên khi giá đóng cửa cắt MA20', on: !!ov.signals, toggle: () => setOv((o: any) => ({ ...o, signals: !o.signals })), group: 'overlay' },
     { id: 'smc', name: 'Smart Money Concepts [LuxAlgo]', desc: 'BOS/CHoCH, Order Block, FVG, EQH/EQL, Premium/Discount', on: smcS.enabled, toggle: () => setSmcS((v) => ({ ...v, enabled: !v.enabled })), group: 'special' },
+    { id: 'ew', name: 'Elliott Wave Analyzer Pro (Ahmad PRO)', desc: 'Sóng Elliott 1-5 / A-B-C / tam giác / WXY, vùng MUA-BÁN, mục tiêu, dừng lỗ, khuyến nghị', on: ewS.enabled, toggle: () => setEwS((v) => ({ ...v, enabled: !v.enabled })), group: 'special' },
     { id: 'fp', name: 'Footprint (Bid x Ask)', desc: 'KL mua/bán chủ động theo từng mức giá', on: fpS.enabled, toggle: () => setFpS((v) => ({ ...v, enabled: !v.enabled })), group: 'special' },
     { id: 'emax', name: `EMA cross ${bt.fast}/${bt.slow} BUY/SELL + Backtest`, desc: 'Chiến lược giao cắt EMA (che_trader)', on: ema.enabled, toggle: () => setEma((v: any) => ({ ...v, enabled: !v.enabled })), group: 'special' },
   ];
@@ -708,9 +747,9 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         if (pendingRange.current) { const k = pendingRange.current; pendingRange.current = null; requestAnimationFrame(() => applyRange(k)); }
         else if (opts.current.fpS.enabled && FP_TF[res] !== undefined) { fpZoomed.current = false; render(); } // footprint tự phóng to
         else if (rows.length > 120) {
-          const r = { from: rows.length - 120, to: rows.length + 5 };
+          const r = { from: rows.length - 120, to: rows.length + rightPad() };
           s.current.chart.timeScale().setVisibleLogicalRange(r);
-          requestAnimationFrame(() => s.current.chart.timeScale().setVisibleLogicalRange(r)); // sau khi biểu đồ phụ đồng bộ
+          requestAnimationFrame(() => { if (!s.current.dead) s.current.chart.timeScale().setVisibleLogicalRange(r); }); // sau khi biểu đồ phụ đồng bộ
         }
       })
       .catch((e) => !dead && setErr(String(e)));
@@ -819,6 +858,8 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
         <button className={ov.signals ? 'on' : ''} onClick={() => setOv({ ...ov, signals: !ov.signals })}>▲ Tín hiệu MA20</button>
         <button className={smcS.enabled ? 'on' : ''} onClick={() => setSmcS({ ...smcS, enabled: !smcS.enabled })}>◆ SMC</button>
         <button className="gear" onClick={() => setSmcOpen((v) => !v)} title="Cài đặt SMC">⚙</button>
+        <button className={ewS.enabled ? 'on' : ''} onClick={() => setEwS({ ...ewS, enabled: !ewS.enabled })} title="Elliott Wave Analyzer Pro: nhận dạng sóng Elliott, vùng mua/bán, mục tiêu">🌊 Ahmad PRO</button>
+        <button className="gear" onClick={() => setEwOpen((v) => !v)} title="Cài đặt Ahmad PRO">⚙</button>
         <button className={fpS.enabled ? 'on' : ''} disabled={!fpAllowed} title={fpAllowed ? 'Footprint: KL mua/bán chủ động theo từng mức giá' : 'Footprint không hỗ trợ khung Tuần'}
           onClick={() => setFpS({ ...fpS, enabled: !fpS.enabled })}>👣 Footprint</button>
         <button className="gear" onClick={() => setFpOpen((v) => !v)} title="Cài đặt Footprint">⚙</button>
@@ -847,6 +888,24 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
             </> : 'Bật 👣 Footprint để tải dữ liệu.'}
             {' '}Bid = bán chủ động, Ask = mua chủ động. UA = phiên đấu giá chưa hoàn tất, EX = cạn kiệt, AB = hấp thụ, ▲Δ/▼Δ = phân kỳ delta. Phóng to biểu đồ để xem số.
           </div>
+        </div>
+      )}
+      {ewOpen && (
+        <div className="smc-panel">
+          <div className="smc-grid">
+            <label><input type="checkbox" checked={ewS.useLeverage} onChange={(e) => setEwS({ ...ewS, useLeverage: e.target.checked, enabled: true })} /> ⚡ Long/Short (phái sinh)</label>
+            <label>Đòn bẩy (x) <input type="number" min={1} max={20} step={0.5} value={ewS.leverageX} onChange={(e) => setEwS({ ...ewS, leverageX: Math.max(1, +e.target.value) })} /></label>
+            <label>Rủi ro/lệnh (%) <input type="number" min={0.5} max={10} step={0.5} value={ewS.riskPct} onChange={(e) => setEwS({ ...ewS, riskPct: Math.max(0.5, +e.target.value) })} /></label>
+            <label>Độ dài pivot <input type="number" min={2} max={50} value={ewS.pivotLen} onChange={(e) => setEwS({ ...ewS, pivotLen: Math.min(50, Math.max(2, +e.target.value)) })} /></label>
+            <label>Sóng tối thiểu (%) <input type="number" min={0.1} max={5} step={0.1} value={ewS.minWavePct} onChange={(e) => setEwS({ ...ewS, minWavePct: Math.max(0.1, +e.target.value) })} /></label>
+            <label>Độ rộng vùng (nến) <input type="number" min={5} max={60} value={ewS.zoneWidth} onChange={(e) => setEwS({ ...ewS, zoneWidth: Math.min(60, Math.max(5, +e.target.value)) })} /></label>
+            {([['showImp', 'Sóng đẩy 1-2-3-4-5'], ['showZig', 'Zigzag A-B-C'], ['showFlt', 'Flat'], ['showTri', 'Tam giác A-B-C-D-E'], ['showDia', 'Diagonal'], ['showCpx', 'Phức hợp W-X-Y'],
+              ['showCorr', 'Khung vùng điều chỉnh'], ['showSig', 'Tín hiệu giao dịch'], ['showZones', 'Vùng MUA / BÁN'], ['showTargets', 'Mục tiêu'], ['showFib', 'Fibonacci thoái lui'],
+              ['showLns', 'Đường nối sóng'], ['showPnl', 'Bảng thông tin'], ['showTADetail', 'Chi tiết kỹ thuật trong bảng']] as [keyof EwOptions, string][]).map(([k, l]) => (
+              <label key={k}><input type="checkbox" checked={!!ewS[k]} onChange={(e) => setEwS({ ...ewS, [k]: e.target.checked, enabled: true })} /> {l}</label>
+            ))}
+          </div>
+          <div className="muted note">Elliott Wave Analyzer Pro ("Ahmad PRO") — port từ Pine Script, giấy phép Mozilla Public License 2.0. Sóng chỉ được xác nhận sau {ewS.pivotLen} nến (pivot) nên mẫu sóng có thể thay đổi khi có nến mới. Không phải khuyến nghị đầu tư.</div>
         </div>
       )}
       {smcOpen && (
@@ -880,6 +939,7 @@ export function StockDetail({ sym, onClose, wide, onWide, full, onFull, onPick, 
             onClone={() => { const c = mkCtx(); if (!c) return; const nd = { ...moveDrawing(selDrawing, 3, 0, c), id: Math.random().toString(36).slice(2), locked: false }; setDrawings((l) => [...l, nd]); setSelId(nd.id); }} />
         )}
         {st?.ex === 'PS' && <PsPanel st={st} vn30={g.indices.get('11')?.value} />}
+        {ewRes && ewS.showPnl && <EwPanel r={ewRes} offsetTop={st?.ex === 'PS' ? 170 : 0} />}
         <OhlcLegend idx={hoverIdx ?? (replay.mode === 'on' ? replay.idx : bars.current.length - 1)} bars={bars.current} lines={legendLines.current}
           res={res} sym={sym} name={symName} ex={st?.ex === 'PS' ? 'Phái sinh' : isIndex ? 'Chỉ số' : st?.ex || ''} />
         {replay.mode === 'select' && <div className="draw-hint">⏪ Bấm vào nến để bắt đầu replay từ đó — các nến sau sẽ bị ẩn · Esc/⏪ để huỷ</div>}

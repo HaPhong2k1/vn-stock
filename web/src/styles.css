@@ -372,3 +372,18 @@ table.mom th { color: var(--muted); font-weight: 600; }
   background: var(--panel); color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
 .osc-auto:hover { color: var(--text); }
 .osc-auto.on { background: #2962ff; border-color: #2962ff; color: #fff; }
+
+/* ---- Bảng thông tin Ahmad PRO (Elliott Wave) ---- */
+.ew-panel { position: absolute; right: 70px; z-index: 6; width: 232px; font-size: 11px; font-variant-numeric: tabular-nums; border: 1px solid #363a45; border-radius: 4px;
+  background: rgba(19, 23, 34, 0.94); color: #d1d4dc; overflow: hidden; }
+.ew-head { display: flex; justify-content: space-between; padding: 4px 8px; background: rgba(41, 98, 255, 0.8); color: #fff; font-weight: 700; }
+.ew-row, .ew-sec { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; }
+.ew-row:nth-child(odd) { background: #232732; }
+.ew-row span, .ew-sec span { color: #9598a1; white-space: nowrap; }
+.ew-row b { text-align: right; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ew-rec { font-size: 12px; padding: 4px 8px; }
+.ew-rec span, .ew-rec b { color: inherit !important; font-weight: 700; }
+.ew-sec { background: #1a1a2e; }
+.ew-sig { font-size: 12px; }
+.ew-sig span, .ew-sig b { color: #fff !important; }
+@media (max-width: 700px) { .ew-panel { width: 190px; right: 62px; } }

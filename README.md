@@ -91,6 +91,13 @@ Cảnh báo gắn với ID ẩn danh của trình duyệt (chưa có đăng nh�
 MA20, MA50, Bollinger(20,2), RSI(14), MACD(12,26,9), mũi tên MUA/BÁN tại các điểm giá đóng cửa cắt MA20; nến cuối và
 chỉ báo cập nhật realtime. Nút tạo cảnh báo nhanh ngay trong khung chi tiết mã.
 
+### Elliott Wave Analyzer Pro ("Ahmad PRO")
+Nút **🌊 Ahmad PRO** trên biểu đồ (⚙ để cài đặt): nhận dạng sóng đẩy 1-2-3-4-5, zigzag/flat A-B-C, tam giác A-B-C-D-E,
+diagonal, W-X-Y / W-X-Y-X-Z; vẽ khung vùng điều chỉnh, vùng MUA / BÁN, mục tiêu sóng, Entry, STOP; bảng thông tin
+khuyến nghị tổng hợp (sóng + EMA + RSI + MACD + Stoch + ADX + xu hướng khung Tuần/Ngày). Chế độ ⚡ Long/Short cho phái sinh.
+> ⚖️ `shared/ewave.js` là bản chuyển từ Pine Script "Elliott Wave Analyzer Pro", giấy phép Mozilla Public License 2.0
+> (https://mozilla.org/MPL/2.0/); file chuyển đổi giữ nguyên giấy phép MPL 2.0. Bỏ phần XAUUSD/XAGUSD.
+
 ### Smart Money Concepts (LuxAlgo) & EMA cross
 - **SMC** (nút ◆ SMC + ⚙ trong khung chi tiết mã): BOS/CHoCH nội bộ & swing, order block (nội bộ/swing, lọc ATR(200),
   tự xoá khi bị phá), EQH/EQL, Fair Value Gap, Strong/Weak High/Low, vùng Premium/Discount, tô màu nến, chế độ Historical/Present.

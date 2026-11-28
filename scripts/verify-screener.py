@@ -32,12 +32,16 @@ for s in syms:
     m = rows[s]
     st = get(f'{API}/api/stock/{s}')
     j = get(f'https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={s}&resolution=1D&from={now-420*86400}&to={now}')
+    # ngoài phiên (cuối tuần/ngày lễ): nến ngày cuối của DNSE đã là phiên gần nhất => không cộng thêm giá hiện tại
+    closed_day = datetime.datetime.utcfromtimestamp(now + 7*3600).weekday() >= 5
     idx = [i for i,t in enumerate(j['t']) if vnd(t) < today]
+    if closed_day: idx = idx[:-1]
     C = [j['c'][i] for i in idx]; V = [j['v'][i] for i in idx]; H=[j['h'][i] for i in idx]
     if len(C) < 25 or not st.get('last'): continue
     live = C + [st['last']]; n = len(live)-1
+    ma10 = sma(live,10); ma10p = sma(live[:-1],10)
     ma20 = sma(live,20); ma20p = sma(live[:-1],20); ma50 = sma(live,50); ma200 = sma(live,200)
-    e = {'ma20': ma20, 'ma50': ma50, 'ma200': ma200, 'rsi14': rsi(live)}
+    e = {'ma10': ma10, 'ma20': ma20, 'ma50': ma50, 'ma200': ma200, 'rsi14': rsi(live)}
     m1 = ema_arr(live,12); m2 = ema_arr(live,26)
     macd_line = [a-b if a is not None and b is not None else None for a,b in zip(m1,m2)]
     st0 = next(i for i,v in enumerate(macd_line) if v is not None)
@@ -45,6 +49,9 @@ for s in syms:
     hist = [a-b if a is not None and b is not None else None for a,b in zip(macd_line, sig)]
     avgv = sum(V[-20:])/len(V[-20:])
     exp = {
+      'aboveMa10': live[-1] > ma10,
+      'ma10CrossUp': live[-2] <= ma10p and live[-1] > ma10,
+      'ma10CrossDown': live[-2] >= ma10p and live[-1] < ma10,
       'aboveMa20': live[-1] > ma20,
       'ma20CrossUp': live[-2] <= ma20p and live[-1] > ma20,
       'ma20CrossDown': live[-2] >= ma20p and live[-1] < ma20,
@@ -57,7 +64,7 @@ for s in syms:
             if (v is None) != (m.get(k) is None): mism.append((s,k,m.get(k),v))
             continue
         if abs(m[k]-v) > max(0.02, abs(v)*0.002): mism.append((s,k,m[k],round(v,3)))
-    for k in ['aboveMa20','ma20CrossUp','ma20CrossDown','macdCrossUp']:
+    for k in ['aboveMa10','ma10CrossUp','ma10CrossDown','aboveMa20','ma20CrossUp','ma20CrossDown','macdCrossUp']:
         if bool(m[k]) != exp[k]: mism.append((s,k,m[k],exp[k]))
     if abs(m['avgVol20'] - avgv) > 1: mism.append((s,'avgVol20',m['avgVol20'],round(avgv)))
     if exp['volRatio'] and abs(m['volRatio'] - exp['volRatio']) > 0.02: mism.append((s,'volRatio',m['volRatio'],round(exp['volRatio'],2)))

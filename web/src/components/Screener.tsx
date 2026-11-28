@@ -5,6 +5,9 @@ import { loadSymbols, fold } from './SymbolSearch';
 
 type Pred = (m: Metrics) => boolean;
 const PRESETS: { key: string; label: string; hint: string; test: Pred }[] = [
+  { key: 'ma10up', label: '🟢 Vượt lên MA10', hint: 'Phiên trước đóng cửa ≤ MA10, giá hiện tại > MA10 (mới vượt trong phiên này)', test: (m) => m.ma10CrossUp },
+  { key: 'above10', label: 'Trên MA10', hint: 'Tất cả mã có giá hiện tại > MA10 (trung bình 10 phiên)', test: (m) => m.aboveMa10 },
+  { key: 'ma10down', label: '🔴 Thủng MA10', hint: 'Phiên trước ≥ MA10, giá hiện tại < MA10', test: (m) => m.ma10CrossDown },
   { key: 'ma20up', label: '🟢 Cắt lên MA20 (MUA)', hint: 'Phiên trước đóng cửa ≤ MA20, giá hiện tại > MA20', test: (m) => m.ma20CrossUp },
   { key: 'ma20down', label: '🔴 Cắt xuống MA20', hint: 'Phiên trước ≥ MA20, giá hiện tại < MA20', test: (m) => m.ma20CrossDown },
   { key: 'above20', label: 'Trên MA20', hint: 'Giá > MA20', test: (m) => m.aboveMa20 },
@@ -33,6 +36,8 @@ const COLS: Col[] = [
   { k: 's', label: 'Mã' }, { k: 'ex', label: 'Sàn' },
   { k: 'price', label: 'Giá', fmt: (m) => m.price.toFixed(2), cls: (m) => pcCls(m.chgPc) },
   { k: 'chgPc', label: '%', fmt: (m) => (m.chgPc > 0 ? '+' : '') + m.chgPc.toFixed(2), cls: (m) => pcCls(m.chgPc) },
+  { k: 'ma10', label: 'MA10', fmt: (m) => n2(m.ma10) },
+  { k: 'distMa10', label: '% vs MA10', fmt: (m) => n2(m.distMa10), cls: (m) => pcCls(m.distMa10) },
   { k: 'ma20', label: 'MA20', fmt: (m) => n2(m.ma20) },
   { k: 'distMa20', label: '% vs MA20', fmt: (m) => n2(m.distMa20), cls: (m) => pcCls(m.distMa20) },
   { k: 'ma50', label: 'MA50', fmt: (m) => n2(m.ma50) },
@@ -144,6 +149,7 @@ export function Screener({ onPick, onQuickAlert, watch }: Props) {
               <tr key={m.s} onClick={() => onPick(m.s)}>
                 {COLS.map((c) => <td key={c.k} className={c.cls?.(m) || ''}>{c.fmt ? c.fmt(m) : String(m[c.k])}</td>)}
                 <td className="tags">
+                  {m.ma10CrossUp && <span className="tag buy">MA10↑</span>}
                   {m.ma20CrossUp && <span className="tag buy">MUA · MA20↑</span>}
                   {m.wMa200CrossUp && <span className="tag buy">MA200 tuần↑</span>}
                   {m.ma20CrossDown && <span className="tag sell">MA20↓</span>}

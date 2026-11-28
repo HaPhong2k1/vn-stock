@@ -30,7 +30,7 @@ export interface Metrics {
   bbUp: number | null; bbLow: number | null; avgVol20: number; volRatio: number | null;
   hi52: number | null; lo52: number | null; distMa20: number | null; live: boolean;
   aboveMa20: boolean; wMa200: number | null; weeks: number; distWMa200: number | null; aboveWMa200: boolean; wMa200CrossUp: boolean; ema10: number | null; ema20: number | null; emaCrossUp: boolean; emaCrossDown: boolean;
-  smcBullChoch: boolean; smcBearChoch: boolean; smcBullBos: boolean; smcBearBos: boolean; smcSwingTrend: number; smcInternalTrend: number; ma20CrossUp: boolean; ma20CrossDown: boolean; macdCrossUp: boolean; ema9CrossUp: boolean; goldenCross: boolean;
+  smcBullChoch: boolean; smcBearChoch: boolean; smcBullBos: boolean; smcBearBos: boolean; smcSwingTrend: number; smcInternalTrend: number; ma20CrossUp: boolean; ma10: number | null; distMa10: number | null; aboveMa10: boolean; ma10CrossUp: boolean; ma10CrossDown: boolean; ma20CrossDown: boolean; macdCrossUp: boolean; ema9CrossUp: boolean; goldenCross: boolean;
 }
 export interface Alert {
   id: string; sym: string; type: string; value: number | null; repeat: boolean; note: string; telegramChatId: string;

@@ -55,7 +55,7 @@ export class Analytics extends EventEmitter {
     const wma200 = sma(wCloses, 200);
     const wMa = wn >= 0 ? wma200[wn] : null, wMaPrev = wn > 0 ? wma200[wn - 1] : null;
     const n = closes.length - 1;
-    const ma20 = sma(closes, 20), ma50 = sma(closes, 50), ma200 = sma(closes, 200);
+    const ma10 = sma(closes, 10), ma20 = sma(closes, 20), ma50 = sma(closes, 50), ma200 = sma(closes, 200);
     const e9 = ema(closes, 9), e21 = ema(closes, 21);
     const rs = rsi(closes, 14);
     const md = macd(closes);
@@ -70,14 +70,18 @@ export class Analytics extends EventEmitter {
     const m = {
       s: sym, ex: st.ex, price, chgPc: st.chgPc, totVol: st.totVol,
       value: st.ex === 'PS' ? (st.avg * st.totVol * 100_000) / 1e9 : st.avg * st.totVol / 1e6, // tỷ đồng (HĐ VN30F: 100.000đ/điểm)
-      ma20: r2(ma20[n]), ma50: r2(ma50[n]), ma200: r2(ma200[n]), ema9: r2(e9[n]), ema21: r2(e21[n]),
+      ma10: r2(ma10[n]), ma20: r2(ma20[n]), ma50: r2(ma50[n]), ma200: r2(ma200[n]), ema9: r2(e9[n]), ema21: r2(e21[n]),
       rsi14: r2(rs[n]), macd: r2(md.line[n]), macdSig: r2(md.signal[n]), macdHist: r2(md.hist[n]),
       bbUp: r2(bb.upper[n]), bbLow: r2(bb.lower[n]),
       avgVol20: Math.round(avgVol20), volRatio: avgVol20 ? r2(vols[n] / avgVol20) : null,
       hi52: r2(hi52), lo52: r2(lo52 === Infinity ? null : lo52),
+      distMa10: ma10[n] ? r2(((price - ma10[n]) / ma10[n]) * 100) : null,
       distMa20: ma20[n] ? r2(((price - ma20[n]) / ma20[n]) * 100) : null,
       live,
       // --- Tín hiệu (theo nến ngày, phiên hiện tại so với phiên trước) ---
+      aboveMa10: ma10[n] !== null && price > ma10[n],
+      ma10CrossUp: ma10[n] !== null && ma10[n - 1] !== null && prevClose <= ma10[n - 1] && price > ma10[n],
+      ma10CrossDown: ma10[n] !== null && ma10[n - 1] !== null && prevClose >= ma10[n - 1] && price < ma10[n],
       aboveMa20: ma20[n] !== null && price > ma20[n],
       ma20CrossUp: ma20[n] !== null && ma20[n - 1] !== null && prevClose <= ma20[n - 1] && price > ma20[n],
       ma20CrossDown: ma20[n] !== null && ma20[n - 1] !== null && prevClose >= ma20[n - 1] && price < ma20[n],
